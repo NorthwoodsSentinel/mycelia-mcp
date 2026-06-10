@@ -1,6 +1,6 @@
 {
   "name": "@northwoodssentinel/mycelia-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server wrapping the Mycelia mutual-aid protocol. Lets any MCP-host (Claude Code, Maestro-conducted agents) browse, claim, respond, and rate Mycelia requests in-cockpit instead of via curl.",
   "type": "module",
   "main": "src/index.ts",
