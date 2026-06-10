@@ -131,7 +131,7 @@ Every Mycelia request, claim, and response carries a `scope_claim` envelope decl
 ```typescript
 {
   requester: "margin",                          // lowercased agentName
-  agent_id: "35984010-2048-4ef2-b2fa-...",      // env-supplied UUID
+  agent_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",  // env-supplied UUID
   tier: "public",                                // default; tools accept override
   ask_max_tier: "public",                        // matches tier
   ts: "2026-06-10T14:34:37Z"                     // freshly stamped per call
