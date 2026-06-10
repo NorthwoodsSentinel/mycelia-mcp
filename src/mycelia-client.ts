@@ -48,6 +48,33 @@ function nowTs(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+/**
+ * Path-segment guard. Mycelia request/response/agent IDs are UUIDs. Anything
+ * containing '/', '?', '#', '..', or non-URL-safe chars is hostile or wrong —
+ * reject upfront rather than encodeURIComponent and pass through. Belt and
+ * suspenders: encodeURIComponent IS still applied at the URL build step.
+ */
+const UUID_LIKE = /^[A-Za-z0-9._-]{1,128}$/;
+function assertSafeId(value: unknown, paramName: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${paramName} must be a string (got ${typeof value})`);
+  }
+  if (!UUID_LIKE.test(value)) {
+    throw new Error(
+      `${paramName} contains disallowed characters or is empty/oversized. ` +
+        `Mycelia IDs are URL-safe tokens up to 128 chars: [A-Za-z0-9._-].`,
+    );
+  }
+  return value;
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_LIMIT = 100;
+function boundLimit(n: unknown): number {
+  const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 20;
+  return Math.max(1, Math.min(MAX_LIMIT, v));
+}
+
 export class MyceliaClient {
   private readonly headers: Record<string, string>;
 
@@ -100,16 +127,55 @@ export class MyceliaClient {
     body?: unknown,
   ): Promise<MyceliaResponse<T>> {
     const url = `${this.config.baseUrl}${path}`;
-    const init: RequestInit = { method, headers: this.headers };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), DEFAULT_TIMEOUT_MS);
+    const init: RequestInit = { method, headers: this.headers, signal: ctrl.signal };
     if (body !== undefined) init.body = JSON.stringify(body);
-    const res = await fetch(url, init);
-    return (await res.json()) as MyceliaResponse<T>;
+    try {
+      const res = await fetch(url, init);
+      // Try to parse JSON; if upstream returns non-JSON (HTML error page from a
+      // proxy, plaintext from a load balancer), surface a typed error rather
+      // than throw raw "Unexpected token < ..." up the stack.
+      const text = await res.text();
+      let parsed: MyceliaResponse<T> | null = null;
+      try {
+        parsed = JSON.parse(text) as MyceliaResponse<T>;
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: `HTTP_${res.status}_NON_JSON`,
+            // Cap body excerpt so a 500KB error page doesn't dominate transcript
+            message: `Upstream returned non-JSON (status ${res.status}): ${text.slice(0, 200)}`,
+          },
+        };
+      }
+      return parsed;
+    } catch (err: unknown) {
+      // Never echo the err.message blind; some runtimes include URL +
+      // sometimes auth header in transport-error messages. Surface only the
+      // error class and HTTP-shape.
+      const cls = err instanceof Error ? err.name : "UnknownError";
+      const aborted = (err as { name?: string }).name === "AbortError";
+      return {
+        ok: false,
+        error: {
+          code: aborted ? "FETCH_TIMEOUT" : `FETCH_${cls.toUpperCase()}`,
+          message: aborted
+            ? `Mycelia API did not respond within ${DEFAULT_TIMEOUT_MS}ms`
+            : `Network error contacting Mycelia API (${cls})`,
+        },
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ── GET endpoints ──────────────────────────────────────────────────────
 
   getProfile(agentId?: string): Promise<MyceliaResponse> {
-    return this.request("GET", `/v1/agents/${agentId ?? this.config.agentId}`);
+    const id = agentId === undefined ? this.config.agentId : assertSafeId(agentId, "agentId");
+    return this.request("GET", `/v1/agents/${encodeURIComponent(id)}`);
   }
 
   browseRequests(opts: {
@@ -120,21 +186,24 @@ export class MyceliaClient {
     limit?: number;
   } = {}): Promise<MyceliaResponse> {
     const params = new URLSearchParams();
-    if (opts.tag) params.set("tag", opts.tag);
-    if (opts.type) params.set("type", opts.type);
-    if (opts.target_agent_id) params.set("target_agent_id", opts.target_agent_id);
-    if (opts.status) params.set("status", opts.status);
-    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.tag) params.set("tag", String(opts.tag).slice(0, 64));
+    if (opts.type) params.set("type", String(opts.type).slice(0, 64));
+    if (opts.target_agent_id) {
+      params.set("target_agent_id", assertSafeId(opts.target_agent_id, "target_agent_id"));
+    }
+    if (opts.status) params.set("status", String(opts.status).slice(0, 32));
+    if (opts.limit !== undefined) params.set("limit", String(boundLimit(opts.limit)));
     const qs = params.toString();
     return this.request("GET", `/v1/requests${qs ? `?${qs}` : ""}`);
   }
 
   getRequest(requestId: string): Promise<MyceliaResponse> {
-    return this.request("GET", `/v1/requests/${requestId}`);
+    const id = assertSafeId(requestId, "request_id");
+    return this.request("GET", `/v1/requests/${encodeURIComponent(id)}`);
   }
 
   getFeed(limit = 20): Promise<MyceliaResponse> {
-    return this.request("GET", `/v1/feed?limit=${limit}`);
+    return this.request("GET", `/v1/feed?limit=${boundLimit(limit)}`);
   }
 
   // ── POST endpoints ─────────────────────────────────────────────────────
@@ -175,7 +244,8 @@ export class MyceliaClient {
     };
     if (opts.estimated_minutes !== undefined) body.estimated_minutes = opts.estimated_minutes;
     if (opts.note) body.note = opts.note;
-    return this.request("POST", `/v1/requests/${opts.request_id}/claims`, body);
+    const id = assertSafeId(opts.request_id, "request_id");
+    return this.request("POST", `/v1/requests/${encodeURIComponent(id)}/claims`, body);
   }
 
   respond(opts: {
@@ -191,7 +261,8 @@ export class MyceliaClient {
       scope_claim: this.scopeClaim(opts.tier),
     };
     if (opts.confidence !== undefined) body.confidence = opts.confidence;
-    return this.request("POST", `/v1/requests/${opts.request_id}/responses`, body);
+    const id = assertSafeId(opts.request_id, "request_id");
+    return this.request("POST", `/v1/requests/${encodeURIComponent(id)}/responses`, body);
   }
 
   rateResponse(opts: {
@@ -207,7 +278,8 @@ export class MyceliaClient {
     };
     if (opts.score !== undefined) body.score = opts.score;
     if (opts.feedback) body.feedback = opts.feedback;
-    return this.request("POST", `/v1/responses/${opts.response_id}/ratings`, body);
+    const id = assertSafeId(opts.response_id, "response_id");
+    return this.request("POST", `/v1/responses/${encodeURIComponent(id)}/ratings`, body);
   }
 
   /**
