@@ -11,6 +11,15 @@
  *
  * Where <NAME> is the value of MYCELIA_MCP_AGENT_NAME (e.g. "MARGIN").
  *
+ * Credential freshness — the file is authoritative, not the inherited env.
+ * `mycelia-refresh` (zshrc) writes rotated keys to ~/.config/fleet/mycelia.env.
+ * An MCP server started by a long-lived parent process inherits whatever that
+ * parent's env held at ITS start, so after a rotation the inherited key is
+ * stale and every call 401s while the file on disk is correct. Observed
+ * 2026-08-07: file key returned 200, MCP returned UNAUTHORIZED. So the file
+ * is read at construction and OVERRIDES the inherited values. Absent file =
+ * no-op; hosts without it (Lares) keep pure env behaviour.
+ *
  * The Mycelia API surface is JSON over HTTPS with Bearer auth. Endpoints used:
  *   GET    /v1/agents/{agent_id}
  *   GET    /v1/requests
@@ -21,6 +30,42 @@
  *   POST   /v1/responses/{response_id}/ratings
  *   GET    /v1/feed
  */
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * Overlay ~/.config/fleet/mycelia.env onto process.env, file wins.
+ * Only MYCELIA_* keys are honoured — this never becomes a general dotenv.
+ * Returns the path read, or null if there was nothing to read.
+ */
+export function loadFleetEnvFile(): string | null {
+  const path =
+    process.env.MYCELIA_ENV_FILE ?? join(homedir(), ".config", "fleet", "mycelia.env");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return null; // absent or unreadable — inherited env stands
+  }
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?(MYCELIA_[A-Z0-9_]+)=(.*)$/);
+    if (!m) continue;
+    const [, key] = m;
+    let value = m[2].trim();
+    // strip one matched pair of surrounding quotes
+    if (
+      value.length >= 2 &&
+      (value[0] === '"' || value[0] === "'") &&
+      value[value.length - 1] === value[0]
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+  return path;
+}
 
 export interface MyceliaConfig {
   agentId: string;
@@ -59,6 +104,7 @@ export class MyceliaClient {
   }
 
   static fromEnv(): MyceliaClient {
+    loadFleetEnvFile();
     const agentName = process.env.MYCELIA_MCP_AGENT_NAME;
     if (!agentName) {
       throw new Error(
