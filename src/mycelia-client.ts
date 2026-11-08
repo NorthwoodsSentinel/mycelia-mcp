@@ -11,6 +11,15 @@
  *
  * Where <NAME> is the value of MYCELIA_MCP_AGENT_NAME (e.g. "MARGIN").
  *
+ * Credential freshness — for the API KEY only, the file wins over the inherited env.
+ * `mycelia-refresh` (zshrc) writes rotated keys to ~/.config/fleet/mycelia.env.
+ * An MCP server started by a long-lived parent process inherits whatever that
+ * parent's env held at ITS start, so after a rotation the inherited key is
+ * stale and every call 401s while the file on disk is correct. Observed
+ * 2026-08-07: file key returned 200, MCP returned UNAUTHORIZED. So the file
+ * is read at construction and OVERRIDES the inherited values. Absent file =
+ * no-op; hosts without it (Lares) keep pure env behaviour.
+ *
  * The Mycelia API surface is JSON over HTTPS with Bearer auth. Endpoints used:
  *   GET    /v1/agents/{agent_id}
  *   GET    /v1/requests
@@ -21,6 +30,47 @@
  *   POST   /v1/responses/{response_id}/ratings
  *   GET    /v1/feed
  */
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * Read ONLY this agent's rotated API key (MYCELIA_PERSONAL_KEY_<NAME>) from ~/.config/fleet/mycelia.env.
+ * Codex audit of c3278cd: overlaying every MYCELIA_* key let the file redirect the destination URL (even to http)
+ * and switch the agent identity, and it mutated global env non-transactionally. Now: one key, returned as a value,
+ * never written to process.env; base URL and agent id stay env-only.
+ * Absent file → null (inherited env stands; hosts without the file keep pure env behaviour).
+ * Any other read error → null plus a loud stderr line; malformed lines are skipped loudly (last valid wins).
+ */
+export function readFleetKeyFromFile(agentNameUpper: string): string | null {
+  const path =
+    process.env.MYCELIA_ENV_FILE ?? join(homedir(), ".config", "fleet", "mycelia.env");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") console.error(`mycelia-mcp: could not read ${path} (${code ?? String(e)}); using inherited env key`);
+    return null;
+  }
+  const want = `MYCELIA_PERSONAL_KEY_${agentNameUpper}`;
+  let found: string | null = null;
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
+    if (!m || m[1] !== want) continue;
+    let value = (m[2] ?? "").trim();
+    if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value[value.length - 1] === value[0]) {
+      value = value.slice(1, -1);
+    }
+    if (!/^[A-Za-z0-9._~+\/=-]{16,512}$/.test(value)) {
+      console.error(`mycelia-mcp: ${want} in ${path} has a malformed assignment (ignored)`);
+      continue; // final audit on 155d682: a malformed line must not defeat a later valid one
+    }
+    found = value; // last VALID assignment wins
+  }
+  return found;
+}
 
 export interface MyceliaConfig {
   agentId: string;
@@ -95,7 +145,7 @@ export class MyceliaClient {
     }
     const upper = agentName.toUpperCase();
     const agentId = process.env[`MYCELIA_PERSONAL_AGENT_ID_${upper}`];
-    const apiKey = process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
+    const apiKey = readFleetKeyFromFile(upper) ?? process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
     const baseUrl = process.env.MYCELIA_PERSONAL_API_BASE;
     if (!agentId) throw new Error(`MYCELIA_PERSONAL_AGENT_ID_${upper} is not set`);
     if (!apiKey) throw new Error(`MYCELIA_PERSONAL_KEY_${upper} is not set`);
