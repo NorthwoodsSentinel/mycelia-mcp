@@ -41,7 +41,7 @@ import { join } from "node:path";
  * and switch the agent identity, and it mutated global env non-transactionally. Now: one key, returned as a value,
  * never written to process.env; base URL and agent id stay env-only.
  * Absent file → null (inherited env stands; hosts without the file keep pure env behaviour).
- * Any other read error, or a malformed value → null plus a loud stderr line (never a silent swap).
+ * Any other read error → null plus a loud stderr line; malformed lines are skipped loudly (last valid wins).
  */
 export function readFleetKeyFromFile(agentNameUpper: string): string | null {
   const path =
@@ -64,10 +64,10 @@ export function readFleetKeyFromFile(agentNameUpper: string): string | null {
       value = value.slice(1, -1);
     }
     if (!/^[A-Za-z0-9._~+\/=-]{16,512}$/.test(value)) {
-      console.error(`mycelia-mcp: ${want} in ${path} is malformed; using inherited env key`);
-      return null;
+      console.error(`mycelia-mcp: ${want} in ${path} has a malformed assignment (ignored)`);
+      continue; // final audit on 155d682: a malformed line must not defeat a later valid one
     }
-    found = value; // last assignment wins, as in a shell
+    found = value; // last VALID assignment wins
   }
   return found;
 }
