@@ -52,8 +52,9 @@ export function loadFleetEnvFile(): string | null {
   for (const line of raw.split("\n")) {
     const m = line.match(/^\s*(?:export\s+)?(MYCELIA_[A-Z0-9_]+)=(.*)$/);
     if (!m) continue;
-    const [, key] = m;
-    let value = m[2].trim();
+    const key = m[1];
+    if (!key) continue;
+    let value = (m[2] ?? "").trim();
     // strip one matched pair of surrounding quotes
     if (
       value.length >= 2 &&
