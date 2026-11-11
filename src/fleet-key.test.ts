@@ -64,11 +64,13 @@ test("[Codex H2] only malformed assignments -> refuse", () => {
   expect(() => MyceliaClient.fromEnv()).toThrow(/none valid/);
 });
 
-test("[Codex H2] unreadable file (non-ENOENT) -> refuse", () => {
+// Codex audit 3873573 (MEDIUM): an early `return` under root counted as a PASS. Skip explicitly instead; the EISDIR
+// test below is the root-proof non-ENOENT case.
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+test.skipIf(isRoot)("[Codex H2] unreadable file (non-ENOENT) -> refuse", () => {
   const p = file(`MYCELIA_PERSONAL_KEY_MARGIN=${GOOD}\n`);
   chmodSync(p, 0o000);
   try {
-    if (process.getuid && process.getuid() === 0) return; // root can read anyway; skip on root
     expect(readFleetKeyFromFile("MARGIN").kind).toBe("error");
     expect(() => MyceliaClient.fromEnv()).toThrow(/could not read/);
   } finally {
