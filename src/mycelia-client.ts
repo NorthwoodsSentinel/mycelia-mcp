@@ -40,22 +40,33 @@ import { join } from "node:path";
  * Codex audit of c3278cd: overlaying every MYCELIA_* key let the file redirect the destination URL (even to http)
  * and switch the agent identity, and it mutated global env non-transactionally. Now: one key, returned as a value,
  * never written to process.env; base URL and agent id stay env-only.
- * Absent file → null (inherited env stands; hosts without the file keep pure env behaviour).
- * Any other read error → null plus a loud stderr line; malformed lines are skipped loudly (last valid wins).
+ *
+ * kintsugi: Codex final audit of 155d682, 2 HIGH: every failure other than an absent file used to fall back to the
+ * inherited (possibly stale) env key. Now the result says which case happened, and only "absent" may fall back:
+ *   absent  -> no file (ENOENT) or MYCELIA_ENV_FILE=none: inherited env key stands (pure-env hosts unchanged)
+ *   key     -> the LAST VALID assignment for this agent (malformed lines are skipped loudly)
+ *   error   -> the file exists but can't be read, or has no valid key for this agent: fromEnv() refuses to start
  */
-export function readFleetKeyFromFile(agentNameUpper: string): string | null {
-  const path =
-    process.env.MYCELIA_ENV_FILE ?? join(homedir(), ".config", "fleet", "mycelia.env");
+export type FleetKeyResult =
+  | { kind: "absent" }
+  | { kind: "key"; value: string }
+  | { kind: "error"; why: string };
+
+export function readFleetKeyFromFile(agentNameUpper: string): FleetKeyResult {
+  const configured = process.env.MYCELIA_ENV_FILE;
+  if (configured === "none") return { kind: "absent" };
+  const path = configured ?? join(homedir(), ".config", "fleet", "mycelia.env");
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (e) {
     const code = (e as NodeJS.ErrnoException)?.code;
-    if (code !== "ENOENT") console.error(`mycelia-mcp: could not read ${path} (${code ?? String(e)}); using inherited env key`);
-    return null;
+    if (code === "ENOENT") return { kind: "absent" };
+    return { kind: "error", why: `could not read ${path} (${code ?? String(e)})` };
   }
   const want = `MYCELIA_PERSONAL_KEY_${agentNameUpper}`;
   let found: string | null = null;
+  let malformed = 0;
   for (const line of raw.split("\n")) {
     const m = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
     if (!m || m[1] !== want) continue;
@@ -64,12 +75,19 @@ export function readFleetKeyFromFile(agentNameUpper: string): string | null {
       value = value.slice(1, -1);
     }
     if (!/^[A-Za-z0-9._~+\/=-]{16,512}$/.test(value)) {
+      malformed++;
       console.error(`mycelia-mcp: ${want} in ${path} has a malformed assignment (ignored)`);
-      continue; // final audit on 155d682: a malformed line must not defeat a later valid one
+      continue; // a malformed line must not defeat a later valid one
     }
     found = value; // last VALID assignment wins
   }
-  return found;
+  if (found) return { kind: "key", value: found };
+  return {
+    kind: "error",
+    why: malformed
+      ? `${path} has ${malformed} assignment(s) of ${want}, none valid`
+      : `${path} exists but has no ${want}`,
+  };
 }
 
 export interface MyceliaConfig {
@@ -118,7 +136,14 @@ export class MyceliaClient {
     }
     const upper = agentName.toUpperCase();
     const agentId = process.env[`MYCELIA_PERSONAL_AGENT_ID_${upper}`];
-    const apiKey = readFleetKeyFromFile(upper) ?? process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
+    const fileKey = readFleetKeyFromFile(upper);
+    if (fileKey.kind === "error") {
+      // Fail closed: a present-but-unusable fleet file must not silently fall back to a possibly stale env key.
+      throw new Error(
+        `mycelia-mcp: refusing to start: ${fileKey.why}. Fix the file, or set MYCELIA_ENV_FILE=none to use the env key.`,
+      );
+    }
+    const apiKey = fileKey.kind === "key" ? fileKey.value : process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
     const baseUrl = process.env.MYCELIA_PERSONAL_API_BASE;
     if (!agentId) throw new Error(`MYCELIA_PERSONAL_AGENT_ID_${upper} is not set`);
     if (!apiKey) throw new Error(`MYCELIA_PERSONAL_KEY_${upper} is not set`);
