@@ -244,7 +244,39 @@ export function checkWiring(rootScripts, workflowText) {
       `\`${GUARDS_WORKFLOW}\` has no unconditional step that runs \`npm run validate\` with \`verify:skills\` inside it, so the skills are not checked on a PR. Restore it (a step behind an \`if:\`, or in a release-only job, does not count).`,
     );
   }
+  // Local edit: `ciRunsUnconditionally` accepts a workflow that fires on push
+  // OR pull_request (the source's rule). Here the gate must run on pull
+  // requests, so a push-only workflow is a finding too.
+  if (!triggersOnPullRequest(workflowText)) {
+    problems.push(
+      `\`${GUARDS_WORKFLOW}\` does not run on \`pull_request\`, so a PR is merged with no gate run on it. Restore the trigger.`,
+    );
+  }
   return problems;
+}
+
+/**
+ * Whether a workflow's `on:` names `pull_request` (any of the three shapes).
+ * Unparseable YAML is not a trigger.
+ *
+ * @param {string} workflowText
+ */
+export function triggersOnPullRequest(workflowText) {
+  let on;
+  try {
+    on = parseYaml(workflowText)?.on;
+  } catch {
+    return false;
+  }
+  const events =
+    typeof on === "string"
+      ? [on]
+      : Array.isArray(on)
+        ? on
+        : on !== null && typeof on === "object"
+          ? Object.keys(on)
+          : [];
+  return events.includes("pull_request");
 }
 
 function main(argv = process.argv.slice(2)) {

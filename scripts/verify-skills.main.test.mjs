@@ -37,6 +37,7 @@ import {
   ciRunsUnconditionally,
   GUARDS_WORKFLOW,
   runsCommand,
+  triggersOnPullRequest,
 } from "./verify-skills.mjs";
 import { GATE_LEASE_WRAPPER, scriptChainRuns } from "./lib/npm-scripts.mjs";
 
@@ -266,7 +267,7 @@ const WIRED_SCRIPTS = {
   "local:gate": "npm run validate && npm run coverage",
 };
 const WIRED_WORKFLOW =
-  "on:\n  push:\njobs:\n  build:\n    steps:\n      - run: npm run validate && npm run coverage\n";
+  "on:\n  pull_request:\n  push:\njobs:\n  build:\n    steps:\n      - run: npm run validate && npm run coverage\n";
 
 test("checkWiring is silent when the gate is wired", () => {
   assert.deepEqual(checkWiring(WIRED_SCRIPTS, WIRED_WORKFLOW), []);
@@ -300,7 +301,8 @@ test("checkWiring catches validate dropped from CI", () => {
 test("checkWiring reports every broken link at once", () => {
   assert.equal(
     checkWiring({ validate: "", "local:gate": "" }, "jobs: {}\n").length,
-    3,
+    // Local edit: 4, with the pull_request link added here.
+    4,
   );
 });
 
@@ -366,7 +368,7 @@ test("checkWiring is not satisfied by a mention outside an executable step", () 
 
 test("checkWiring accepts the command inside a multi-line run step", () => {
   const workflow =
-    "on:\n  push:\njobs:\n  build:\n    steps:\n      - run: |\n          npm run coverage\n          npm run validate\n";
+    "on:\n  pull_request:\njobs:\n  build:\n    steps:\n      - run: |\n          npm run coverage\n          npm run validate\n";
   assert.deepEqual(checkWiring(WIRED_SCRIPTS, workflow), []);
 });
 
@@ -684,4 +686,23 @@ test("scriptChainRuns does not follow a masked intermediate hop (#4895)", () => 
     ),
     true,
   );
+});
+
+// Local addition: the gate must run on pull requests, not only on push.
+test("checkWiring catches a workflow that no longer runs on pull_request", () => {
+  const pushOnly =
+    "on:\n  push:\njobs:\n  build:\n    steps:\n      - run: npm run validate && npm run coverage\n";
+  assert.match(
+    checkWiring(WIRED_SCRIPTS, pushOnly).join(),
+    /does not run on `pull_request`/,
+  );
+});
+
+test("triggersOnPullRequest reads all three `on:` shapes and refuses bad YAML", () => {
+  assert.equal(triggersOnPullRequest("on: pull_request\n"), true);
+  assert.equal(triggersOnPullRequest("on: [push, pull_request]\n"), true);
+  assert.equal(triggersOnPullRequest("on:\n  pull_request:\n"), true);
+  assert.equal(triggersOnPullRequest("on: push\n"), false);
+  assert.equal(triggersOnPullRequest("jobs: {}\n"), false);
+  assert.equal(triggersOnPullRequest("on: [\n"), false);
 });

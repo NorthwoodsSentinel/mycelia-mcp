@@ -62,6 +62,86 @@ describe("tools/list", () => {
   });
 });
 
+// The public tool contract, written out by hand: each tool's properties, its
+// required fields and its enums. A change to `TOOLS` that drops a required
+// field, renames a property or alters an enum fails here, not only in review.
+const TIER = ["public", "private", "intimate"];
+const CONTRACT: Record<
+  string,
+  { props: string[]; required: string[]; enums: Record<string, string[]> }
+> = {
+  mycelia_browse_requests: {
+    props: ["tag", "type", "target_agent_id", "status", "limit"],
+    required: [],
+    enums: { status: ["open", "claimed", "responded", "closed", "expired"] },
+  },
+  mycelia_get_request: {
+    props: ["request_id"],
+    required: ["request_id"],
+    enums: {},
+  },
+  mycelia_claim_request: {
+    props: ["request_id", "estimated_minutes", "note", "tier"],
+    required: ["request_id"],
+    enums: { tier: TIER },
+  },
+  mycelia_respond: {
+    props: ["request_id", "body", "confidence", "response_type", "tier"],
+    required: ["request_id", "body"],
+    enums: { tier: TIER },
+  },
+  mycelia_rate_response: {
+    props: ["response_id", "direction", "score", "feedback", "tier"],
+    required: ["response_id", "direction"],
+    enums: { direction: ["up", "down"], tier: TIER },
+  },
+  mycelia_feed: { props: ["limit"], required: [], enums: {} },
+  mycelia_my_outgoing: { props: ["limit"], required: [], enums: {} },
+  mycelia_post_request: {
+    props: [
+      "title",
+      "body",
+      "target_agent_id",
+      "tags",
+      "type",
+      "max_responses",
+      "expires_hours",
+      "priority",
+      "tier",
+    ],
+    required: ["title", "body"],
+    enums: { tier: TIER },
+  },
+};
+
+describe("the tool contract", () => {
+  it("tools/list serves exactly the contract", async () => {
+    const mcp = await connect(fakeClient().c);
+    const { tools } = await mcp.listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual(
+      Object.keys(CONTRACT).sort(),
+    );
+    for (const t of tools) {
+      const want = CONTRACT[t.name];
+      expect(want, t.name).toBeDefined();
+      if (!want) continue;
+      const props = (t.inputSchema.properties ?? {}) as Record<
+        string,
+        { type?: string; enum?: string[] }
+      >;
+      expect(t.inputSchema.type, t.name).toBe("object");
+      expect(Object.keys(props), t.name).toEqual(want.props);
+      expect(t.inputSchema.required ?? [], t.name).toEqual(want.required);
+      const enums = Object.fromEntries(
+        Object.entries(props)
+          .filter(([, v]) => v.enum !== undefined)
+          .map(([k, v]) => [k, v.enum]),
+      );
+      expect(enums, t.name).toEqual(want.enums);
+    }
+  });
+});
+
 describe("tools/call", () => {
   it("mycelia_browse_requests passes its filters", async () => {
     const { c, spies } = fakeClient();
