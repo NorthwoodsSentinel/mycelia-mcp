@@ -1,0 +1,7 @@
+# Files `npm run format` and `npm run format:check` leave alone. Prettier also
+# skips everything in .gitignore (node_modules, dist, build, coverage).
+
+# Coverage report written by `npm run coverage`.
+coverage/
+# Uniquely named scratch files; never committed.
+.scratch/

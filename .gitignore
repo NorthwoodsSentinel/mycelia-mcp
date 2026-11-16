@@ -8,3 +8,5 @@ bun.lockb
 .vscode/
 dist/
 build/
+coverage/
+.scratch/

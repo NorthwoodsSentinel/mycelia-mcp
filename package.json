@@ -9,14 +9,34 @@
   },
   "scripts": {
     "start": "bun src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "verify:action-pins": "node scripts/verify-action-pins.mjs",
+    "verify:skills": "node scripts/verify-skills.mjs",
+    "test:scripts": "node --test scripts/verify-action-pins.test.mjs && node --test scripts/dco-check.test.mjs && node --test scripts/lib/main-module.test.mjs && node --test scripts/smoke-inspector.test.mjs && node --test scripts/lib/skill-manifest.test.mjs && node --test scripts/lib/npm-scripts.test.mjs && node --test scripts/verify-skills.main.test.mjs && node --test scripts/entry-points.test.mjs",
+    "format": "prettier --write \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}\"",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run test:scripts && vitest run --coverage",
+    "validate": "npm run verify:action-pins && npm run verify:skills && npm run format:check && npm run lint && npm run typecheck && npm run test",
+    "smoke": "node scripts/smoke-inspector.mjs",
+    "dco:check": "node scripts/dco-check.mjs",
+    "local:dco": "node scripts/dco-check.mjs --base origin/main",
+    "local:gate": "npm run validate && npm run local:dco && npm run smoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
-    "typescript": "^5.9.3"
+    "@vitest/coverage-v8": "4.1.12",
+    "eslint": "^10.8.0",
+    "globals": "^17.7.0",
+    "prettier": "3.8.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "4.1.12",
+    "yaml": "^2.9.0"
   },
   "license": "AGPL-3.0-or-later",
   "author": "NorthwoodsSentinel",
