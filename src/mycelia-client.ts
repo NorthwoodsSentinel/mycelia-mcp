@@ -97,7 +97,8 @@ export class MyceliaClient {
     const agentId = process.env[`MYCELIA_PERSONAL_AGENT_ID_${upper}`];
     const apiKey = process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
     const baseUrl = process.env.MYCELIA_PERSONAL_API_BASE;
-    if (!agentId) throw new Error(`MYCELIA_PERSONAL_AGENT_ID_${upper} is not set`);
+    if (!agentId)
+      throw new Error(`MYCELIA_PERSONAL_AGENT_ID_${upper} is not set`);
     if (!apiKey) throw new Error(`MYCELIA_PERSONAL_KEY_${upper} is not set`);
     if (!baseUrl) throw new Error("MYCELIA_PERSONAL_API_BASE is not set");
     return new MyceliaClient({ agentId, apiKey, baseUrl, agentName: upper });
@@ -129,7 +130,11 @@ export class MyceliaClient {
     const url = `${this.config.baseUrl}${path}`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), DEFAULT_TIMEOUT_MS);
-    const init: RequestInit = { method, headers: this.headers, signal: ctrl.signal };
+    const init: RequestInit = {
+      method,
+      headers: this.headers,
+      signal: ctrl.signal,
+    };
     if (body !== undefined) init.body = JSON.stringify(body);
     try {
       const res = await fetch(url, init);
@@ -174,25 +179,34 @@ export class MyceliaClient {
   // ── GET endpoints ──────────────────────────────────────────────────────
 
   getProfile(agentId?: string): Promise<MyceliaResponse> {
-    const id = agentId === undefined ? this.config.agentId : assertSafeId(agentId, "agentId");
+    const id =
+      agentId === undefined
+        ? this.config.agentId
+        : assertSafeId(agentId, "agentId");
     return this.request("GET", `/v1/agents/${encodeURIComponent(id)}`);
   }
 
-  browseRequests(opts: {
-    tag?: string;
-    type?: string;
-    target_agent_id?: string;
-    status?: string;
-    limit?: number;
-  } = {}): Promise<MyceliaResponse> {
+  browseRequests(
+    opts: {
+      tag?: string;
+      type?: string;
+      target_agent_id?: string;
+      status?: string;
+      limit?: number;
+    } = {},
+  ): Promise<MyceliaResponse> {
     const params = new URLSearchParams();
     if (opts.tag) params.set("tag", String(opts.tag).slice(0, 64));
     if (opts.type) params.set("type", String(opts.type).slice(0, 64));
     if (opts.target_agent_id) {
-      params.set("target_agent_id", assertSafeId(opts.target_agent_id, "target_agent_id"));
+      params.set(
+        "target_agent_id",
+        assertSafeId(opts.target_agent_id, "target_agent_id"),
+      );
     }
     if (opts.status) params.set("status", String(opts.status).slice(0, 32));
-    if (opts.limit !== undefined) params.set("limit", String(boundLimit(opts.limit)));
+    if (opts.limit !== undefined)
+      params.set("limit", String(boundLimit(opts.limit)));
     const qs = params.toString();
     return this.request("GET", `/v1/requests${qs ? `?${qs}` : ""}`);
   }
@@ -227,8 +241,10 @@ export class MyceliaClient {
       scope_claim: this.scopeClaim(opts.tier),
     };
     if (opts.target_agent_id) body.target_agent_id = opts.target_agent_id;
-    if (opts.max_responses !== undefined) body.max_responses = opts.max_responses;
-    if (opts.expires_hours !== undefined) body.expires_hours = opts.expires_hours;
+    if (opts.max_responses !== undefined)
+      body.max_responses = opts.max_responses;
+    if (opts.expires_hours !== undefined)
+      body.expires_hours = opts.expires_hours;
     if (opts.priority) body.priority = opts.priority;
     return this.request("POST", "/v1/requests", body);
   }
@@ -242,10 +258,15 @@ export class MyceliaClient {
     const body: Record<string, unknown> = {
       scope_claim: this.scopeClaim(opts.tier),
     };
-    if (opts.estimated_minutes !== undefined) body.estimated_minutes = opts.estimated_minutes;
+    if (opts.estimated_minutes !== undefined)
+      body.estimated_minutes = opts.estimated_minutes;
     if (opts.note) body.note = opts.note;
     const id = assertSafeId(opts.request_id, "request_id");
-    return this.request("POST", `/v1/requests/${encodeURIComponent(id)}/claims`, body);
+    return this.request(
+      "POST",
+      `/v1/requests/${encodeURIComponent(id)}/claims`,
+      body,
+    );
   }
 
   respond(opts: {
@@ -262,7 +283,11 @@ export class MyceliaClient {
     };
     if (opts.confidence !== undefined) body.confidence = opts.confidence;
     const id = assertSafeId(opts.request_id, "request_id");
-    return this.request("POST", `/v1/requests/${encodeURIComponent(id)}/responses`, body);
+    return this.request(
+      "POST",
+      `/v1/requests/${encodeURIComponent(id)}/responses`,
+      body,
+    );
   }
 
   rateResponse(opts: {
@@ -279,7 +304,11 @@ export class MyceliaClient {
     if (opts.score !== undefined) body.score = opts.score;
     if (opts.feedback) body.feedback = opts.feedback;
     const id = assertSafeId(opts.response_id, "response_id");
-    return this.request("POST", `/v1/responses/${encodeURIComponent(id)}/ratings`, body);
+    return this.request(
+      "POST",
+      `/v1/responses/${encodeURIComponent(id)}/ratings`,
+      body,
+    );
   }
 
   /**
@@ -289,7 +318,8 @@ export class MyceliaClient {
   async myOutgoing(limit = 20): Promise<MyceliaResponse> {
     const feed = await this.getFeed(50);
     if (!feed.ok || !feed.data) return feed;
-    const events = (feed.data as { events: Array<Record<string, unknown>> }).events ?? [];
+    const events =
+      (feed.data as { events: Array<Record<string, unknown>> }).events ?? [];
     const myRequestIds = new Set<string>();
     for (const e of events) {
       if (

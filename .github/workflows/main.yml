@@ -1,0 +1,94 @@
+# CI for mycelia-mcp.
+#
+# The shape is the MCP Inspector's CI workflow (modelcontextprotocol/inspector,
+# .github/workflows/main.yml at commit d330df96): the same file name and
+# workflow name, the same least-privilege `permissions`, one pinned runtime
+# version stated once, and a `timeout-minutes` on the job. Where this file
+# differs, the reason is beside the line. Record: PROVENANCE.md.
+#
+# One job runs every stage of `npm run local:gate`, the command a developer
+# runs before pushing, except `local:dco`: `validate` (pin guard, skills
+# guard, format check, lint, typecheck, the script tests and the Vitest tests
+# with per-file coverage), then `smoke` (the pinned MCP Inspector over stdio,
+# against a fake Mycelia API on 127.0.0.1). `local:dco` reads `origin/main`,
+# which this shallow checkout does not have, so it stays local (the
+# Inspector's reason, its docs/quality-gate.md); a pull request's commits are
+# checked by .github/workflows/dco.yml instead.
+#
+# This workflow holds no secret and can write nothing. It deploys and
+# publishes nothing.
+#
+# Limits, accepted: a pull request that edits this file, or the scripts it
+# runs, is judged by the edited version (as in the Inspector; the control is
+# review of the diff). The check is not REQUIRED for merging until a
+# repository ruleset names it (the owner's act); the job name `validate` below
+# is the name that ruleset will match, so rename both together or not at all.
+
+name: CI
+
+on:
+  # `pull_request`, not `pull_request_target`: the workflow runs from the pull
+  # request's own revision with a read-only token and no secret.
+  # No branch or path filter: a required check that a filter skips would stay
+  # "expected" forever.
+  pull_request:
+  # The Inspector uses a bare `push:`. Here that would run every pull request
+  # branch twice (once for the push, once for the pull request), so pushes are
+  # limited to the branch pull requests merge into.
+  push:
+    branches: [main]
+
+# Least privilege for GITHUB_TOKEN (the Inspector's block, verbatim). Without
+# it the job would inherit the repository's default token permissions.
+permissions:
+  contents: read
+
+env:
+  # The one pinned runtime, stated once (the Inspector's pattern for its npm
+  # pin). Bun runs the server's TypeScript source in the smoke and installs
+  # from bun.lock.
+  CI_BUN_VERSION: "1.3.14"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # PROVISIONAL: no run of this workflow had been observed when it was
+    # written. Locally the gate took under two minutes (the smoke is 28
+    # Inspector runs, about 1 s each, once the package is in the npx cache).
+    # 10 minutes is a hung-job guard, not a flake remedy; re-size it from
+    # observed runs, with the range, once there are some. Each Inspector run is
+    # killed at 60 s (scripts/smoke-inspector.mjs) and Vitest's per-test budget
+    # is 10 s, so they fire first.
+    timeout-minutes: 10
+
+    steps:
+      # Every action is pinned to a commit SHA with its exact release, in
+      # every job of this repo; `npm run verify:action-pins` enforces it.
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes; do not leave the token in the checkout.
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.x"
+          # No `cache: npm` (the Inspector has it): the install is small, and
+          # a cache is one more thing that can differ between runs.
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.CI_BUN_VERSION }}
+
+      - name: Install dependencies
+        # From this repo's lockfile (bun.lock; there is no package-lock.json),
+        # and without running any dependency's install script: nothing the
+        # gate runs needs one.
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run the gate (every stage of local:gate but the local-only local:dco)
+        # `smoke` fetches the pinned Inspector with `npx` from the public npm
+        # registry; it needs network access and no secret.
+        run: npm run validate && npm run smoke

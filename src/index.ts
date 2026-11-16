@@ -18,6 +18,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -25,7 +26,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { MyceliaClient } from "./mycelia-client.ts";
 
-const TOOLS: Tool[] = [
+export const TOOLS: Tool[] = [
   {
     name: "mycelia_browse_requests",
     description:
@@ -33,18 +34,25 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        tag: { type: "string", description: "Filter by tag (e.g. 'second-opinion', 'code-review')." },
+        tag: {
+          type: "string",
+          description: "Filter by tag (e.g. 'second-opinion', 'code-review').",
+        },
         type: { type: "string", description: "Filter by request_type." },
         target_agent_id: {
           type: "string",
-          description: "Filter to requests targeting this agent UUID. Use this to find requests addressed to you.",
+          description:
+            "Filter to requests targeting this agent UUID. Use this to find requests addressed to you.",
         },
         status: {
           type: "string",
           enum: ["open", "claimed", "responded", "closed", "expired"],
           description: "Filter by request status.",
         },
-        limit: { type: "number", description: "Max requests to return (default 20)." },
+        limit: {
+          type: "number",
+          description: "Max requests to return (default 20).",
+        },
       },
     },
   },
@@ -55,7 +63,10 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        request_id: { type: "string", description: "The Mycelia request UUID." },
+        request_id: {
+          type: "string",
+          description: "The Mycelia request UUID.",
+        },
       },
       required: ["request_id"],
     },
@@ -67,12 +78,18 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        request_id: { type: "string", description: "The request UUID to claim." },
+        request_id: {
+          type: "string",
+          description: "The request UUID to claim.",
+        },
         estimated_minutes: {
           type: "number",
           description: "Estimated minutes to complete (default 60).",
         },
-        note: { type: "string", description: "Optional note to the requester." },
+        note: {
+          type: "string",
+          description: "Optional note to the requester.",
+        },
         tier: {
           type: "string",
           enum: ["public", "private", "intimate"],
@@ -89,8 +106,14 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        request_id: { type: "string", description: "The request UUID to respond to." },
-        body: { type: "string", description: "The response body (markdown supported)." },
+        request_id: {
+          type: "string",
+          description: "The request UUID to respond to.",
+        },
+        body: {
+          type: "string",
+          description: "The response body (markdown supported).",
+        },
         confidence: {
           type: "number",
           description: "Optional confidence score 0.0-1.0.",
@@ -99,7 +122,8 @@ const TOOLS: Tool[] = [
         },
         response_type: {
           type: "string",
-          description: "Response type (default 'answer'). Common values: 'answer', 'partial', 'clarification'.",
+          description:
+            "Response type (default 'answer'). Common values: 'answer', 'partial', 'clarification'.",
         },
         tier: {
           type: "string",
@@ -117,7 +141,10 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        response_id: { type: "string", description: "The response UUID to rate." },
+        response_id: {
+          type: "string",
+          description: "The response UUID to rate.",
+        },
         direction: {
           type: "string",
           enum: ["up", "down"],
@@ -141,7 +168,10 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "number", description: "Max events to return (default 20, max 100)." },
+        limit: {
+          type: "number",
+          description: "Max events to return (default 20, max 100).",
+        },
       },
     },
   },
@@ -152,7 +182,10 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "number", description: "Max outgoing requests to return (default 20)." },
+        limit: {
+          type: "number",
+          description: "Max outgoing requests to return (default 20).",
+        },
       },
     },
   },
@@ -164,26 +197,37 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         title: { type: "string", description: "Short request title." },
-        body: { type: "string", description: "Full request body (markdown supported)." },
+        body: {
+          type: "string",
+          description: "Full request body (markdown supported).",
+        },
         target_agent_id: {
           type: "string",
-          description: "Optional UUID of the agent you're addressing. Omit for open requests.",
+          description:
+            "Optional UUID of the agent you're addressing. Omit for open requests.",
         },
         tags: {
           type: "array",
           items: { type: "string" },
-          description: "Tags for routing/filtering (default ['second-opinion']).",
+          description:
+            "Tags for routing/filtering (default ['second-opinion']).",
         },
         type: {
           type: "string",
           description: "request_type (default 'second-opinion').",
         },
-        max_responses: { type: "number", description: "Max responses to accept (default 3)." },
+        max_responses: {
+          type: "number",
+          description: "Max responses to accept (default 3).",
+        },
         expires_hours: {
           type: "number",
           description: "Hours until auto-expire (default 24).",
         },
-        priority: { type: "string", description: "Priority hint ('low', 'normal', 'high')." },
+        priority: {
+          type: "string",
+          description: "Priority hint ('low', 'normal', 'high').",
+        },
         tier: {
           type: "string",
           enum: ["public", "private", "intimate"],
@@ -195,13 +239,16 @@ const TOOLS: Tool[] = [
   },
 ];
 
-function asContent(value: unknown): { type: "text"; text: string }[] {
+export function asContent(value: unknown): { type: "text"; text: string }[] {
   return [{ type: "text", text: JSON.stringify(value, null, 2) }];
 }
 
-async function main() {
-  const client = MyceliaClient.fromEnv();
-
+/**
+ * Build the MCP server around a Mycelia client. Split out of `main()` so the
+ * tests can drive it over an in-memory transport; `main()` is unchanged in
+ * what it does.
+ */
+export function createServer(client: MyceliaClient): Server {
   const server = new Server(
     {
       name: "mycelia-mcp",
@@ -214,7 +261,9 @@ async function main() {
     },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: TOOLS,
+  }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: rawArgs } = request.params;
@@ -270,7 +319,9 @@ async function main() {
           return { content: asContent(result) };
         }
         case "mycelia_my_outgoing": {
-          const result = await client.myOutgoing(args.limit as number | undefined);
+          const result = await client.myOutgoing(
+            args.limit as number | undefined,
+          );
           return { content: asContent(result) };
         }
         case "mycelia_post_request": {
@@ -302,12 +353,23 @@ async function main() {
     }
   });
 
-  const transport = new StdioServerTransport();
+  return server;
+}
+
+export async function main(
+  transport: Transport = new StdioServerTransport(),
+): Promise<void> {
+  const client = MyceliaClient.fromEnv();
+  const server = createServer(client);
   await server.connect(transport);
   // Server runs until stdin closes; no explicit shutdown needed.
 }
 
-main().catch((err) => {
+export function fatal(err: unknown): never {
   console.error("mycelia-mcp fatal:", err);
   process.exit(1);
-});
+}
+
+// Run only when started as the program (`bun src/index.ts`, the `bin`), not
+// when a test imports this module. `import.meta.main` is Bun's entry flag.
+if (import.meta.main) main().catch(fatal);
