@@ -6,6 +6,9 @@
 // its messages or the repository's own wiring. The parser, `runsCommand`,
 // `ciRunsUnconditionally` and `scriptChainRuns` cases are the source's,
 // unchanged; they use `verify:skills:cli` only as a sample command name.
+// Later, with the `verify:skills:cli` stage and `skills:eval` brought in: the
+// cases for the source's two `verify:skills:cli` links and for
+// `checkEvalNotWired` (nothing a gate or CI runs reaches the eval).
 // `#N` and `inspector#N` references are the source repos' issues and PRs.
 //
 // `skill-manifest.test.mjs` covers the parsers; this covers `main()` — that the
@@ -258,16 +261,23 @@ test("reports every offender in one pass rather than dying on the first", () => 
 // repo's (verify-skills.mjs, `checkWiring`): the sibling guard
 // `verify:action-pins` reachable from `validate`, `verify:skills` reached by
 // `local:gate`, and the workflow running `npm run validate` unconditionally
-// with `verify:skills` inside it.
+// with `verify:skills` inside it. Beside them: the pull_request trigger, the
+// source's two `verify:skills:cli` links, and `checkEvalNotWired`.
 
+// With the `verify:skills:cli` stage: the source's two links for it
+// (local:gate and CI), and the check that nothing a gate or CI runs reaches
+// `skills:eval`.
 const WIRED_SCRIPTS = {
   validate: "npm run verify:action-pins && npm run verify:skills",
   "verify:action-pins": "node scripts/verify-action-pins.mjs",
   "verify:skills": "node scripts/verify-skills.mjs",
-  "local:gate": "npm run validate && npm run coverage",
+  "verify:skills:cli": "node scripts/verify-skills-cli.mjs",
+  "skills:eval": "node scripts/skill-eval.mjs",
+  "local:gate":
+    "npm run validate && npm run verify:skills:cli && npm run coverage",
 };
 const WIRED_WORKFLOW =
-  "on:\n  pull_request:\n  push:\njobs:\n  build:\n    steps:\n      - run: npm run validate && npm run coverage\n";
+  "on:\n  pull_request:\n  push:\njobs:\n  build:\n    steps:\n      - run: npm run validate && npm run verify:skills:cli && npm run coverage\n";
 
 test("checkWiring is silent when the gate is wired", () => {
   assert.deepEqual(checkWiring(WIRED_SCRIPTS, WIRED_WORKFLOW), []);
@@ -301,9 +311,120 @@ test("checkWiring catches validate dropped from CI", () => {
 test("checkWiring reports every broken link at once", () => {
   assert.equal(
     checkWiring({ validate: "", "local:gate": "" }, "jobs: {}\n").length,
-    // Local edit: 4, with the pull_request link added here.
-    4,
+    // Local edit: 4, with the pull_request link added here; 6 with the two
+    // `verify:skills:cli` links.
+    6,
   );
+});
+
+// The authoritative validator's two links.
+
+test("checkWiring catches verify:skills:cli dropped from local:gate", () => {
+  const scripts = {
+    ...WIRED_SCRIPTS,
+    "local:gate": "npm run validate && npm run coverage",
+  };
+  assert.match(
+    checkWiring(scripts, WIRED_WORKFLOW).join(),
+    /local:gate` no longer runs `verify:skills:cli`/,
+  );
+});
+
+test("checkWiring rejects a masked verify:skills:cli in local:gate", () => {
+  for (const gate of [
+    "npm run validate && npm run verify:skills:cli || true",
+    "npm run validate && true || npm run verify:skills:cli",
+    "npm run validate && echo npm run verify:skills:cli",
+  ]) {
+    assert.match(
+      checkWiring(
+        { ...WIRED_SCRIPTS, "local:gate": gate },
+        WIRED_WORKFLOW,
+      ).join(),
+      /local:gate` no longer runs `verify:skills:cli`/,
+      gate,
+    );
+  }
+});
+
+test("checkWiring catches verify:skills:cli dropped from, masked in, or made conditional in CI", () => {
+  const head = "on:\n  pull_request:\n  push:\njobs:\n  build:\n    steps:\n";
+  for (const step of [
+    "      - run: npm run validate && npm run coverage\n",
+    "      - run: npm run validate && npm run verify:skills:cli || true\n",
+    "      - if: false\n        run: npm run verify:skills:cli\n",
+    "      - continue-on-error: true\n        run: npm run verify:skills:cli\n",
+  ]) {
+    assert.match(
+      checkWiring(WIRED_SCRIPTS, head + step).join(),
+      /no unconditional step that runs `npm run verify:skills:cli`/,
+      step,
+    );
+  }
+});
+
+// The model-spending eval is never reachable from a gate or CI.
+
+test("checkWiring catches skills:eval reached from validate, directly or through a chain", () => {
+  for (const extra of [
+    { validate: `${WIRED_SCRIPTS.validate} && npm run skills:eval` },
+    {
+      validate: `${WIRED_SCRIPTS.validate} && npm run helper`,
+      helper: "npm run skills:eval",
+    },
+    {
+      validate: `${WIRED_SCRIPTS.validate} && npm run helper`,
+      helper: "node scripts/skill-eval.mjs",
+    },
+  ]) {
+    assert.match(
+      checkWiring({ ...WIRED_SCRIPTS, ...extra }, WIRED_WORKFLOW).join(),
+      /reaches `skill(s:eval|-eval\.mjs)`/,
+      JSON.stringify(extra),
+    );
+  }
+});
+
+test("checkWiring catches skills:eval reached from local:gate", () => {
+  const scripts = {
+    ...WIRED_SCRIPTS,
+    "local:gate": `${WIRED_SCRIPTS["local:gate"]} && npm run skills:eval`,
+  };
+  assert.match(
+    checkWiring(scripts, WIRED_WORKFLOW).join(),
+    /`npm run local:gate` reaches `skills:eval`/,
+  );
+});
+
+test("checkWiring catches the eval in CI, by name, by file, or through a script CI runs", () => {
+  const head = "on:\n  pull_request:\n  push:\njobs:\n  build:\n    steps:\n";
+  const wired =
+    "      - run: npm run validate && npm run verify:skills:cli && npm run coverage\n";
+  for (const [step, extra] of [
+    ["      - run: npm run skills:eval\n", {}],
+    ["      - run: node scripts/skill-eval.mjs\n", {}],
+    ["      - run: npm run nightly\n", { nightly: "npm run skills:eval" }],
+  ]) {
+    assert.match(
+      checkWiring({ ...WIRED_SCRIPTS, ...extra }, head + wired + step).join(),
+      /skill(s:eval|-eval\.mjs)/,
+      step,
+    );
+  }
+});
+
+test("checkWiring allows skills:eval to exist when nothing a gate runs reaches it", () => {
+  assert.deepEqual(checkWiring(WIRED_SCRIPTS, WIRED_WORKFLOW), []);
+});
+
+test("checkEvalNotWired allows the eval's own unit tests in test:scripts", () => {
+  // The stubbed `skill-eval.test.mjs` spends nothing and must stay in the gate.
+  const scripts = {
+    ...WIRED_SCRIPTS,
+    validate: `${WIRED_SCRIPTS.validate} && npm run test:scripts`,
+    "test:scripts": "node --test scripts/skill-eval.test.mjs",
+  };
+  assert.deepEqual(checkWiring(scripts, WIRED_WORKFLOW), []);
 });
 
 const REPO_ROOT = path.resolve(
@@ -368,7 +489,7 @@ test("checkWiring is not satisfied by a mention outside an executable step", () 
 
 test("checkWiring accepts the command inside a multi-line run step", () => {
   const workflow =
-    "on:\n  pull_request:\njobs:\n  build:\n    steps:\n      - run: |\n          npm run coverage\n          npm run validate\n";
+    "on:\n  pull_request:\njobs:\n  build:\n    steps:\n      - run: |\n          npm run coverage\n          npm run validate\n          npm run verify:skills:cli\n";
   assert.deepEqual(checkWiring(WIRED_SCRIPTS, workflow), []);
 });
 

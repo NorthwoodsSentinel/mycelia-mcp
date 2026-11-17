@@ -152,9 +152,10 @@ Override the tier per call via the `tier` parameter on any tool that accepts it.
 bun install --frozen-lockfile
 npm run local:gate   # the pre-push gate: everything CI runs, plus the local sign-off check
 bun src/index.ts     # run the server (waits on stdio)
+npm run skills:eval  # by hand only (spends model calls): the skills' trigger evals, Claude runner
 ```
 
-`npm run local:gate` runs `validate` (action-pin and skills guards, Prettier check, ESLint with no warnings allowed, `tsc --noEmit`, the guards' own tests, and the Vitest tests with 90% per-file coverage on lines, statements, functions and branches), then `local:dco` (every commit signed off), then `smoke` (the pinned MCP Inspector CLI driving `bun src/index.ts` over stdio against a local fake of the Mycelia API; nothing leaves the machine). Run `npm run format` before committing. The rules for working in this repo are in `AGENTS.md`; where they came from is in `PROVENANCE.md`; how to run the Inspector by hand is the `client-smoke` skill (`.claude/skills/client-smoke/SKILL.md`).
+`npm run local:gate` runs `validate` (action-pin and skills guards, Prettier check, ESLint with no warnings allowed, `tsc --noEmit`, the guards' own tests, and the Vitest tests with 90% per-file coverage on lines, statements, functions and branches), then `local:dco` (every commit signed off), then `verify:skills:cli` (`claude plugin validate` at the pinned Claude Code CLI version: a matching installed CLI, else the pinned package fetched with `npx -y`; no authentication), then `smoke` (the pinned MCP Inspector CLI driving `bun src/index.ts` over stdio against a local fake of the Mycelia API; nothing leaves the machine). Run `npm run format` before committing. The rules for working in this repo are in `AGENTS.md`; where they came from is in `PROVENANCE.md`; how to run the Inspector by hand is the `client-smoke` skill (`.claude/skills/client-smoke/SKILL.md`); how to write a skill and its eval cases is `docs/skill-authoring.md`.
 
 The Mycelia client is at `src/mycelia-client.ts`. The MCP transport + tool routing is at `src/index.ts`. Both are small and stay that way on purpose.
 

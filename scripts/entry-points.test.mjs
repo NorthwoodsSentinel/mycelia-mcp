@@ -21,15 +21,26 @@
 // or writes: `dco-check --base HEAD` checks an empty range, which always
 // passes; `smoke-inspector` runs with an empty PATH, so its first step (the
 // registry integrity check) fails at once and `main()` returns 1 on that line
-// instead of starting the Inspector. Run via `npm run test:scripts`.
+// instead of starting the Inspector. `verify-skills-cli` runs with a stub
+// `claude` alone on PATH (below), so it takes its local-CLI branch and never
+// reaches the network. Run via `npm run test:scripts`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PINNED_CLI_VERSION } from "./lib/skill-manifest.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -120,5 +131,61 @@ for (const { script, args, env, terminal } of GUARDS) {
         `(${terminal.map((t) => `exit ${t.status} + ${t.line}`).join(" | ")}); ` +
         `a silent exit, or a banner alone, means it checked nothing. Output:\n${output}`,
     );
+  });
+}
+
+// verify-skills-cli prints no end-of-run line of its own on success (the
+// Inspector's script ends with the validator's own output), so its banner
+// alone cannot be the verdict. A stub `claude`, alone on PATH, reports the
+// pinned version, so the guard takes its local-CLI branch (no network); its
+// `plugin validate` prints a line naming the directory it was handed and
+// exits with STUB_STATUS. The pass needs that stub line, which appears only if
+// the guard really spawned the validator; the fail needs the guard's own
+// rejection line, which it prints only after propagating the validator's
+// exit status.
+const STUB_BIN = path.join(linkDir, "stub-bin");
+mkdirSync(STUB_BIN);
+writeFileSync(
+  path.join(STUB_BIN, "claude"),
+  [
+    "#!/bin/sh",
+    `if [ "$1" = "--version" ]; then echo "${PINNED_CLI_VERSION} (Claude Code)"; exit 0; fi`,
+    'if [ "$1 $2" = "plugin validate" ]; then',
+    '  echo "stub-validate: $3"',
+    '  exit "${STUB_STATUS:-0}"',
+    "fi",
+    "exit 2",
+    "",
+  ].join("\n"),
+);
+chmodSync(path.join(STUB_BIN, "claude"), 0o755);
+
+for (const [stubStatus, status, line] of [
+  ["0", 0, /^stub-validate: \.claude\/skills$/m],
+  [
+    "1",
+    1,
+    /^verify:skills:cli — `claude plugin validate` rejected the skills\.$/m,
+  ],
+]) {
+  test(`verify-skills-cli.mjs reports a terminal verdict through a symlinked checkout (validator exits ${stubStatus})`, () => {
+    const res = spawnSync(
+      process.execPath,
+      [path.join(LINK, "scripts", "verify-skills-cli.mjs")],
+      {
+        cwd: LINK,
+        encoding: "utf8",
+        env: { ...process.env, PATH: STUB_BIN, STUB_STATUS: stubStatus },
+        timeout: GUARD_TIMEOUT_MS,
+      },
+    );
+    assert.equal(res.error, undefined, `did not run: ${res.error}`);
+    const output = `${res.stdout}${res.stderr}`;
+    assert.match(
+      output,
+      /^verify:skills:cli — validating \.claude\/skills via local claude .+ \(matches the pin\)…$/m,
+    );
+    assert.equal(res.status, status, output);
+    assert.match(output, line);
   });
 }

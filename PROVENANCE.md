@@ -43,3 +43,22 @@ Sources:
   its transport as a parameter, defaulting to stdio. What the server does
   when started is unchanged.
 - `src/*.ts`: reformatted by Prettier; no other change.
+
+## Skill validator and skill eval
+
+Copied from the Inspector at `d330df96` (blob ids read with
+`git rev-parse d330df96:<path>`). `skills:eval` is run by hand only.
+
+| This repo | Source (Inspector) | Git blob id | Edits |
+| --- | --- | --- | --- |
+| `scripts/verify-skills-cli.mjs` | `scripts/verify-skills-cli.mjs` (129 lines) | `13c91b4cf08390b3d673df189f0b3dc53fabef55` | A header; `isMainModule` entry check. The local-CLI trust of a version banner is the source's, kept. |
+| `scripts/verify-skills-cli.test.mjs` | same path (114 lines) | `2c93a77d5f355d70e413c7c4b5fd1541e7ee3246` | Unchanged below a provenance note. |
+| `scripts/skill-eval.mjs` | `scripts/skill-eval.mjs` (1078 lines) | `615e7594d260fd1c096bd21b3d5d1fd02f638a36` | A header; `isMainModule` entry check. Both runners kept; isolation left to the caller, as in the source. |
+| `scripts/skill-eval.test.mjs` | same path (1159 lines) | `d0ec5d9ecfb0b00018efd1391826b481822aaf96` | A provenance note; the placeholder home directory in the `agentEnv` case is `/home/dev`. |
+| `scripts/lib/claude-cli.mjs`, test | same paths (105, 106 lines) | `060fa37681afcc49ce664194b003af0b6c0b28e0`, `b590da109dec04c8bba2c2de99462de3ff29805c` | Unchanged below a provenance note. |
+| `scripts/lib/win-shell-args.mjs`, test | same paths (62, 61 lines) | `05b4ecd5315a18afc79138bce326a4b89d10fbdd`, `2cfd0b8aa7c1cfd40f7a1d3ccb7bead62fa89bc7` | Unchanged below a provenance note. |
+| `docs/skill-authoring.md` | same path (587 lines) | `945b472736dffbf949ca77faa7d4f8ec6e44b4f5` | Method kept as written. Runnable commands name this repo's skill (`client-smoke`); "Measuring GitHub Copilot" cut to what applies here; a banner says the remaining worked examples and numbers are the Inspector's. |
+| `package.json` `verify:skills:cli`, `skills:eval`; `local:gate` | Inspector `package.json` scripts of the same names | — | `verify:skills:cli` sits after `local:dco` and before `smoke`. `test:scripts` stays an explicit list and gains the four new test files. |
+| `.github/workflows/main.yml` gate line | Inspector `main.yml` step "Validate the skills with the authoritative CLI (#2163)" | — | A stage of the one gate line (the CI line is `local:gate` minus `local:dco`), not a separate step. |
+| `scripts/verify-skills.mjs` `checkWiring`, test | Servers: the source's two `verify:skills:cli` links (`local:gate`, CI) | — | Restored beside this repo's links. Added here: `checkEvalNotWired`, which fails if anything `validate`, `local:gate` or a CI step runs reaches `skills:eval` or `skill-eval.mjs`. |
+| `scripts/entry-points.test.mjs` | Written here | — | Two cases for `verify-skills-cli.mjs` through the symlinked checkout, with a stub `claude` on PATH that reports the pin: one where the validator passes, one where it rejects. |
