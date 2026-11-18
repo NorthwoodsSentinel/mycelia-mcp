@@ -57,7 +57,7 @@
  *     source's runner for its tools.
  *   - The pinned package's registry integrity is checked against the value
  *     recorded here before anything runs. npm verifies the tarball it fetches
- *     against that registry value, so a republished or substituted 2.15.0
+ *     against that registry value, so a republished or substituted 2.16.0
  *     fails here rather than running.
  *   - This server is a client of the Mycelia HTTP API, so the smoke serves a
  *     fake of that API on 127.0.0.1 (an OS-chosen port) and points the server
@@ -96,22 +96,23 @@ import { isMainModule } from "./lib/main-module.mjs";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * The pinned Inspector. 2.15.0 is the only release outside the vulnerable
+ * The pinned Inspector. 2.16.0 is the only release outside the vulnerable
  * range of every advisory the Inspector repository had published when this
- * was written (read 2026-11-15 with `gh api
+ * was written (read 2026-11-18 with `gh api
  * repos/modelcontextprotocol/inspector/security-advisories`): 2.0.0-2.11.0
  * are in GHSA-q978-78c7-phqw, GHSA-vcc9-3xgm-p9v4 and GHSA-m5pj-3536-3xcp
  * (fixed 2.12.0); 2.12.0-2.13.0 in GHSA-h9j8-vj8g-v3gg,
  * GHSA-rwv7-mh2c-ff2p and GHSA-2fw8-7jmw-r937 (fixed 2.14.0); 2.14.0 in
  * GHSA-fvg8-f358-w2c8, GHSA-5572-x678-xmv8, GHSA-9w48-x22j-rrm7 and
- * GHSA-pp85-586h-2m95 (fixed 2.15.0). It is also the version of the source
- * clone this form was copied from (d330df96).
+ * GHSA-pp85-586h-2m95 (fixed 2.15.0); 2.7.0-2.15.0 in GHSA-3xgv-mvj6-g78r
+ * (fixed 2.16.0). The source clone this form was copied from (d330df96) was
+ * at 2.15.0.
  */
-export const INSPECTOR_VERSION = "2.15.0";
+export const INSPECTOR_VERSION = "2.16.0";
 export const INSPECTOR_PACKAGE = `@modelcontextprotocol/inspector@${INSPECTOR_VERSION}`;
-/** `npm view @modelcontextprotocol/inspector@2.15.0 dist.integrity`, 2026-11-15. */
+/** `npm view @modelcontextprotocol/inspector@2.16.0 dist.integrity`, 2026-11-18. */
 export const INSPECTOR_INTEGRITY =
-  "sha512-TWdX2oJNVTan3B0/0YLpVJWbeuuii3cgDnc7uIwAiCQ9q7QMvZuQrapkQXOC2MKsmyNWj0tplWjza3IolBU+wA==";
+  "sha512-eZjQQE0ZRI4UsLPkQXYHaQ/PgWdERcx66l0qneH2bIwRpAGrXlK+4xV/M3Q68OnBFLfDXJjy2Dj09GZuB38wnw==";
 
 /**
  * The 2026-07-28 era does not gate yet. It is the newest era the pinned

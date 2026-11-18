@@ -56,11 +56,11 @@ without the placeholder token `SMOKE_AGENT.key` from the script.
 ## The Inspector CLI
 
 ```sh
-npx --yes @modelcontextprotocol/inspector@2.15.0 --cli <server command> <inspector options>
+npx --yes @modelcontextprotocol/inspector@2.16.0 --cli <server command> <inspector options>
 ```
 
 It starts the server command over stdio, sends one request, prints the result
-and exits. Always name the exact version: 2.15.0 is the pin `npm run smoke`
+and exits. Always name the exact version: 2.16.0 is the pin `npm run smoke`
 uses, and the reason for it (every earlier 2.x release is inside a published
 advisory) is beside `INSPECTOR_VERSION` in `scripts/smoke-inspector.mjs`.
 Change the pin there, not here. `--cli --help` is the reference for the
@@ -71,7 +71,7 @@ into words, so there the whole string is taken as one command name ("no such
 file or directory").
 
 ```sh
-INSPECT="npx --yes @modelcontextprotocol/inspector@2.15.0 --cli"
+INSPECT="npx --yes @modelcontextprotocol/inspector@2.16.0 --cli"
 FAKE=http://127.0.0.1:<port>          # the URL the fake printed
 
 # Keep the Inspector off your real state (see Environment).

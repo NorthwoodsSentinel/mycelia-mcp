@@ -53,7 +53,7 @@ const envelope = (code) =>
   `banner\n{"error":{"code":"${code}","message":"m"}}\n`;
 
 test("the Inspector is pinned to one exact version, with its integrity recorded", () => {
-  assert.equal(INSPECTOR_PACKAGE, "@modelcontextprotocol/inspector@2.15.0");
+  assert.equal(INSPECTOR_PACKAGE, "@modelcontextprotocol/inspector@2.16.0");
   assert.match(INSPECTOR_INTEGRITY, /^sha512-[A-Za-z0-9+/]+=*$/);
 });
 
