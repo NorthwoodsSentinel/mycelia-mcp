@@ -1,0 +1,34 @@
+[
+  {
+    "prompt": "Create a PR for NOR-463.",
+    "expect": "pr-flow"
+  },
+  {
+    "prompt": "I've finished the fix for NOR-471. Take it through to a pull request.",
+    "expect": "pr-flow"
+  },
+  {
+    "prompt": "Two commits I already pushed failed the DCO check. Rewrite them with sign-offs.",
+    "expect": "pr-flow"
+  },
+  {
+    "prompt": "Run the Codex review loop on PR #44.",
+    "expect": "pr-flow"
+  },
+  {
+    "prompt": "My PR is open and green. Walk me through getting it merged and closed out here.",
+    "expect": "pr-flow"
+  },
+  {
+    "prompt": "Open the PR for NOR-480, then keep getting Codex to review it until it has nothing left to say.",
+    "expect": "pr-flow"
+  },
+  {
+    "prompt": "What does this regex match? /^[a-z]+$/",
+    "expect": null
+  },
+  {
+    "prompt": "Translate 'good morning' into Spanish.",
+    "expect": null
+  }
+]

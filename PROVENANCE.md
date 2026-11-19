@@ -57,6 +57,25 @@ a `Todo` move. One more, specific to Linear and recorded in `board-ops`:
 `assignee: "me"` resolves to the connector's account, so it cannot tell agents
 apart.
 
+## PR flow
+
+The Inspector's `pr-flow` skill (commit `d330df96`, blob
+`528d9a4b97ea63960ff60464aed4625583997dd1`; unchanged at `eb54b44`, read
+2026-11-19) takes an issue to a merged pull request on a GitHub project board,
+with a Copilot review loop. It was adapted for Linear and a Codex review loop in
+a private sibling repository of the same owner; that file was copied here from
+its commit `7b91d61` and then edited for this repo. The evidence step is the
+MCP reference servers' adaptation of the Inspector's screenshot rule
+(`modelcontextprotocol/servers`, `docs/agent-guidance-inception.md` at
+`e1d154ee`, section 3.2).
+
+| This repo | Source | What the earlier adaptation changed | Edits made here |
+| --- | --- | --- | --- |
+| `.claude/skills/pr-flow/SKILL.md` | Inspector `.claude/skills/pr-flow/SKILL.md` | Linear tickets through `/board-ops` and `/issue-create` in place of the project board; branch `nor-<N>-<slug>` from `origin/main`; client evidence in place of screenshots; a Codex round on a detached worktree at the exact head in place of the Copilot loop, with one PR comment per round in place of per-thread replies; the loop's exits as a table. | **The merge is the owner's.** The sibling's last step has the agent merge its own PR; here an agent never merges, so that step became two: what the agent checks and hands the owner (with one merge command that refuses a moved head), and the close-out after the owner merges. Also: the `In Progress` move and the worktree are stated as one start, and the order before `In Review` is stated, since `/board-ops` cannot check either; one transport and the eras the server serves; the round is run through the `codex-review` wrapper only, with no host-specific command; a check of the commit identity before the first commit, because the repository is public; "a pushed branch and a PR body are public"; a commit pushed after the last audited one is named; rules that exist only in the sibling's rules file are left out. |
+| `.claude/skills/pr-flow/evals/evals.json` | the source's `evals/evals.json` | The source's case shapes, in this flow's terms. | Unchanged. |
+| `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the evidence rule | Inspector `AGENTS.md` ("Attach screenshots as proof of functionality"); servers inception doc, section 3.2 | — | The index row; the intro names `pr-flow`; a new rule, client evidence in place of screenshots, so the evidence step is a rule here and not only a step in a skill. |
+| `.claude/skills/board-ops/SKILL.md`, and its index row | (already recorded above) | — | Three wording fixes: the description and the index row name all four preconditioned states (`In Review` was added to the skill and not to its summaries); in "Close as Duplicate" the instruction to save anything worth keeping now comes before the step that closes the issue. |
+
 ## Contribution policy, issue forms and security policy
 
 Copied from the Inspector at `eb54b44` (blob ids read with
