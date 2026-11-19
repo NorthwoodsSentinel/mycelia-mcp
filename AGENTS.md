@@ -207,4 +207,4 @@ Pick by how many notifications the wait needs:
 - Spending.
 - Secrets, including any real Mycelia agent key.
 - Repository settings, including rulesets.
-- Anything public or sent to other people.
+- Anything public or sent to other people, **with one named exception** (the owner, 2026-11-19): to bring a change to the owner, an agent may push a branch to this repository, open a pull request from it, comment on that pull request, and send the change's diff to the review model for the Codex round these rules require, after checking that it carries nothing private. Nothing else public is an agent's: not merging, not a reply to someone outside, not an issue, a release, a setting or a label.

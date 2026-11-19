@@ -12,6 +12,8 @@ The rules this procedure follows are in [`AGENTS.md`](../../../AGENTS.md): **Iss
 
 **The owner picks the work and merges it. An agent carries a ticket to an open, reviewed PR, and closes out after the merge.** An agent starts only on a ticket in `Todo`, and never merges a pull request here (`AGENTS.md`, Contributing; Only the owner does).
 
+**Four public acts in this procedure are the agent's, and only these four**, by the named exception in `AGENTS.md`, Only the owner does: pushing a branch (step 5), opening a pull request from it (step 5), commenting on that pull request (steps 6 and 7), and sending the change's diff to the review model (step 6). Everything else public stays the owner's. A step here that seems to need another public act (creating a label, replying to someone outside, changing a setting) is a hand-off to the owner, not a step.
+
 ## 1. Start from a ticket
 
 **Every PR references a ticket, with no exceptions.** If there is none yet, file one with `/issue-create` before you branch. Never open the PR and backfill the ticket.
@@ -104,7 +106,7 @@ gh pr create -R NorthwoodsSentinel/mycelia-mcp --base main --head nor-<N>-<slug>
 
 - Write the body to a file and pass `--body-file`, so nothing in it is read as a flag. It also replaces the pull request template, whose banner is for outside contributors.
 - ⚠️ **A pushed branch and a PR body are public the moment they exist.** Nothing private goes in either: no host name, no home-directory path, no agent's name, no personal detail, no secret.
-- `--label` fails when the label does not exist in the repository. Check with `gh label list -R NorthwoodsSentinel/mycelia-mcp` first.
+- `--label` fails when the label does not exist in the repository. Check with `gh label list -R NorthwoodsSentinel/mycelia-mcp` first. Creating a label is the owner's: ask, and do not open the PR without the label to get around it.
 
 **Then move the ticket to `In Review`** with `/board-ops`, and read it back. Then go straight to step 6.
 
