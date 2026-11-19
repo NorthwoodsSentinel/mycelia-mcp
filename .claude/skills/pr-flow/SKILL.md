@@ -14,6 +14,8 @@ The rules this procedure follows are in [`AGENTS.md`](../../../AGENTS.md): **Iss
 
 **Four public acts in this procedure are the agent's, and only these four**, by the named exception in `AGENTS.md`, Only the owner does: pushing a branch (step 5), opening a pull request from it (step 5), commenting on that pull request (steps 6 and 7), and sending the change's diff to the review model (step 6). Everything else public stays the owner's. A step here that seems to need another public act (creating a label, replying to someone outside, changing a setting) is a hand-off to the owner, not a step.
 
+**The ticket writes this procedure makes are not among them and do not need to be.** Linear is the owner's private tracker, not a public place: filing a ticket, setting its labels, moving its state and commenting on it are what `AGENTS.md`, Issue-driven Work Style, asks of an agent.
+
 ## 1. Start from a ticket
 
 **Every PR references a ticket, with no exceptions.** If there is none yet, file one with `/issue-create` before you branch. Never open the PR and backfill the ticket.
@@ -71,14 +73,22 @@ A sign-off certifies the commit in **your own name**. Never fabricate someone el
 
 `npm run format`, **commit**, then `npm run local:gate`. `npm run validate` is **not** a substitute (`AGENTS.md`, Mandatory pre-push gate).
 
-⚠️ **A gate result belongs to a commit only when the tree was clean.** The gate reads the working tree, not the commit: a repair left uncommitted passes the gate while the commit that gets pushed is still broken. So:
+⚠️ **A gate result belongs to a commit only when the gate exited 0 on a clean tree and the commit did not move.** The gate reads the working tree, not the commit: a repair left uncommitted passes the gate while the commit that gets pushed is still broken. So run it this way:
 
 ```sh
-[ -z "$(git status --porcelain)" ] && GATED=$(git rev-parse HEAD) && npm run local:gate; echo "gate exit=$?"
-[ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" = "$GATED" ] && echo "gate passed on $GATED"
+if [ -n "$(git status --porcelain)" ]; then
+  echo "NO PASS: the tree is not clean; commit first"
+else
+  GATED=$(git rev-parse HEAD); npm run local:gate; rc=$?
+  if [ "$rc" -eq 0 ] && [ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" = "$GATED" ]; then
+    echo "gate passed on $GATED"
+  else
+    echo "NO PASS: gate exit=$rc, or the tree or HEAD changed while it ran"
+  fi
+fi
 ```
 
-No `gate passed on` line, no push. `$GATED` is the only commit the result covers; if anything is committed afterwards, run it again. The gate is judged by its exit code, read directly: a pipe into `tail` or `grep` reports the pipe's exit code and hides the gate's.
+**No `gate passed on` line, no push.** That line prints only when the gate's own exit code was 0, read directly and not through a pipe, the tree was clean before and after, and `HEAD` is still the commit the gate started on. `$GATED` is the only commit the result covers; if anything is committed afterwards, run it again.
 
 ## 4a. Evidence, in place of screenshots
 
@@ -177,11 +187,13 @@ When the loop stops, post a PR comment saying which exit fired. ⚠️ **If a co
 
 Check these on that head, and report each as read, not as assumed:
 
-- **The checks are green on the head, from the real workflows:** `validate` and `DCO` are **check runs from the `github-actions` app**, `completed`, with conclusion `success`.
-  - A missing, pending, neutral or failed one is reported as that. Only the push-only `DCO (main push)` job may be `skipped` on a PR.
-  - ⚠️ Read **every page** (`--paginate`). A first page alone can miss a check run.
-  - ⚠️ Read the check runs **with their app**. A commit **status** named `validate` or `DCO` on that SHA is not one of these check runs: report it, and do not count it as green.
-  - ⚠️ **The app and the name do not prove the workflow.** A PR that changes `.github/workflows/` is checked by the definitions it changes, so a green `validate` or `DCO` on it says nothing about the workflows on `main`. Say whether the PR touches that folder. If it does, say so first in the hand-off, and say that its checks are not evidence until the owner has read the workflow diff.
+- **The two required workflows ran on that head and succeeded.** Green means: a run of `.github/workflows/main.yml` on this head whose job `validate` is `completed` / `success`, **and** a run of `.github/workflows/dco.yml` on this head whose job `DCO` is `completed` / `success`.
+  - ⚠️ **Read the workflow file of every run, not only a check's name.** A job called `validate` in any other workflow file is not the gate, whatever it reports, and does not count.
+  - Report **every** run on the head. A pending, failed, cancelled or neutral run of either workflow is reported as that; if one workflow has more than one run on the head, list them all and do not pick the green one.
+  - Only the push-only `DCO (main push)` job may be `skipped` on a PR.
+  - ⚠️ Read **every page** (`--paginate`).
+  - A commit **status** named `validate` or `DCO` on that SHA is not a workflow run: report it, and do not count it as green.
+  - ⚠️ **A PR that changes `.github/workflows/` is checked by the definitions it changes**, so its green runs say nothing about the workflows on `main`. Say whether the PR touches that folder. If it does, say so first in the hand-off, and say that its checks are not evidence until the owner has read the workflow diff.
 - **The last Codex round**: its verdict, the SHA it audited, and which exit of 6c fired. Every declined finding, with its ticket.
 - **GitHub reports `mergeable: MERGEABLE` and `mergeStateStatus: CLEAN`.** `MERGEABLE` alone only means no conflicts.
 - **Anything the change needs that only the owner can do**: a repository setting, a label, a secret. Name each one and its current value, read from the API.
@@ -190,18 +202,33 @@ Check these on that head, and report each as read, not as assumed:
 ```sh
 R=NorthwoodsSentinel/mycelia-mcp
 HEAD_SHA=$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)
-gh api --paginate repos/$R/commits/$HEAD_SHA/check-runs \
-  --jq '.check_runs[] | "\(.name) app=\(.app.slug) \(.status) \(.conclusion)"'
-gh api --paginate repos/$R/commits/$HEAD_SHA/statuses \
-  --jq '.[] | select(.context == "validate" or .context == "DCO") | .context'   # expect no output
-git fetch origin && git diff --quiet origin/main...$HEAD_SHA -- .github/workflows/ \
-  && echo "workflows unchanged by this PR" || echo "THIS PR CHANGES THE WORKFLOWS"
-gh pr view <PR> -R $R --json mergeable,mergeStateStatus
-[ "$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)" = "$HEAD_SHA" ] \
-  && echo "head unchanged: $HEAD_SHA"
+if [ "${#HEAD_SHA}" -ne 40 ]; then
+  echo "NO HAND-OFF: could not resolve the head"
+else
+  gh api --paginate "repos/$R/actions/runs?head_sha=$HEAD_SHA" \
+    --jq '.workflow_runs[] | "run=\(.id) \(.path) \(.event) \(.status) \(.conclusion)"'
+  for id in $(gh api --paginate "repos/$R/actions/runs?head_sha=$HEAD_SHA" --jq '.workflow_runs[].id'); do
+    gh api --paginate "repos/$R/actions/runs/$id/jobs" \
+      --jq '.jobs[] | "run='"$id"' job=\(.name) \(.status) \(.conclusion)"'
+  done
+  gh api --paginate "repos/$R/commits/$HEAD_SHA/statuses" \
+    --jq '.[] | select(.context == "validate" or .context == "DCO") | .context'   # expect no output
+  if git fetch origin && git diff --quiet "origin/main...$HEAD_SHA" -- .github/workflows/; then
+    echo "workflows unchanged by this PR"
+  else
+    echo "THIS PR CHANGES THE WORKFLOWS, or the comparison could not be made"
+  fi
+  gh pr view <PR> -R $R --json mergeable,mergeStateStatus
+  AGAIN=$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)
+  if [ "${#AGAIN}" -eq 40 ] && [ "$AGAIN" = "$HEAD_SHA" ]; then
+    echo "head unchanged: $HEAD_SHA"
+  else
+    echo "NO HAND-OFF: the head moved or could not be read again"
+  fi
+fi
 ```
 
-**No `head unchanged` line, no hand-off.** The head moved while you were reading: start this step again. The audited SHA of step 6 is compared with `$HEAD_SHA` too, and a difference is reported, not smoothed over.
+**No `head unchanged` line, no hand-off.** It prints only for a full 40-character SHA read twice and equal; a lookup that fails prints `NO HAND-OFF` instead. If the head moved while you were reading, start this step again. The audited SHA of step 6 is compared with `$HEAD_SHA` too, and a difference is reported, not smoothed over.
 
 Then give the owner the merge as **one command** that refuses a head that moved:
 
