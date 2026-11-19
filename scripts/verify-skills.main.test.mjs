@@ -8,7 +8,8 @@
 // unchanged; they use `verify:skills:cli` only as a sample command name.
 // Later, with the `verify:skills:cli` stage and `skills:eval` brought in: the
 // cases for the source's two `verify:skills:cli` links and for
-// `checkEvalNotWired` (nothing a gate or CI runs reaches the eval).
+// `checkEvalNotWired` (no gate or CI step names the eval), and a last case that
+// requires every tracked test file under scripts/ to be named in `test:scripts`.
 // `#N` and `inspector#N` references are the source repos' issues and PRs.
 //
 // `skill-manifest.test.mjs` covers the parsers; this covers `main()` — that the
@@ -826,4 +827,35 @@ test("triggersOnPullRequest reads all three `on:` shapes and refuses bad YAML", 
   assert.equal(triggersOnPullRequest("on: push\n"), false);
   assert.equal(triggersOnPullRequest("jobs: {}\n"), false);
   assert.equal(triggersOnPullRequest("on: [\n"), false);
+});
+
+// Local addition (Codex audits of 64c0b51 and 0ccfbba): `test:scripts` is an
+// explicit list, one `node --test <file>` per file, so a listed file that goes
+// missing fails the run. The list cannot catch a test file nobody added to it,
+// or one whose entry was removed. So this asks git for every tracked file
+// under scripts/ whose name marks it as a test, in any of the usual spellings,
+// and requires each one to be named in `test:scripts`.
+test("test:scripts names every tracked test file under scripts/", () => {
+  const repo = path.resolve(path.dirname(SCRIPT), "..");
+  const pkg = JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8"));
+  const listed = new Set(
+    pkg.scripts["test:scripts"]
+      .split(/\s+/)
+      .filter((t) => t.startsWith("scripts/")),
+  );
+  const res = spawnSync("git", ["ls-files", "-z", "scripts"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  assert.equal(res.status, 0, res.stderr);
+  const tracked = res.stdout
+    .split("\0")
+    .filter((f) => /(^|[./_-])(test|spec)([./_-]|$)/.test(path.basename(f)));
+  assert.ok(tracked.length > 0, "git listed no test files under scripts/");
+  const missing = tracked.filter((f) => !listed.has(f));
+  assert.deepEqual(
+    missing,
+    [],
+    `tracked but not in test:scripts: ${missing.join(", ")}`,
+  );
 });
