@@ -43,5 +43,4 @@ To help triage and respond quickly, please include:
 - Any suggested fixes (optional)
 
 **Do not include a real Mycelia agent key, or any other live secret, in a
-report.** If a report needs one to reproduce, say so and it will be arranged
-privately.
+report.** If a report needs one to reproduce, say so in the report.

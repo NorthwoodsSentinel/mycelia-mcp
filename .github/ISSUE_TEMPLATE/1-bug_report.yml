@@ -131,8 +131,8 @@ body:
       label: Already prototyped a fix?
       description: >
         Please don't attach a diff or open a pull request — share the **exact
-        prompt(s)** you used to produce the change, plus what you verified. It
-        is reproduced through the workflow here so it arrives with the right
+        prompt(s)** you used to produce the change, plus what you verified. If
+        it is taken up, it is reproduced through the workflow here with the right
         conventions, tests, and coverage.
     validations:
       required: false

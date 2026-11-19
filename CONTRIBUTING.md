@@ -43,26 +43,27 @@ own workflow** only: by the maintainer, or by a coding agent working for the
 maintainer under [`AGENTS.md`](./AGENTS.md). The maintainer merges every one.
 The repository's settings limit pull-request creation to collaborators.
 
-If you're not the maintainer, open a **detailed issue** instead and it will be
-picked up from there. If you've already prototyped the change locally, say so
-in the issue and include the prompt you used (see
+If you're not the maintainer, open a **detailed issue** instead. The maintainer
+decides which issues are taken up; an issue is a report, not a commitment. If
+you've already prototyped the change locally, say so in the issue and include
+the prompt you used (see
 [If you've already fixed it locally](#if-youve-already-fixed-it-locally)) —
-that's the fastest path from your work to a merged change.
+that's the shortest path from your work to a change here.
 
 **Every pull request references a tracked item**, including the maintainer's
 own. Work here is tracked in the maintainer's issue tracker, whose items are
 written `NOR-<number>`; a pull request's first line is `Closes NOR-<number>`.
 An issue you file on GitHub that is taken up gets a tracked item of its own,
 and the two are linked — which is why a well-formed issue is the useful
-contribution here, and why writing one is never wasted effort.
+contribution here.
 
 ## How to contribute a bug report or feature request
 
 Open a well-formed issue describing the bug or the feature you have in mind.
 A great issue gives everything needed to act on it without a round-trip —
 see [What makes a good issue or prompt submission](#what-makes-a-good-issue-or-prompt-submission)
-below. That's the whole process: you describe the intent, the maintainer
-handles the design and implementation.
+below. That's the whole process: you describe the intent; if it is taken up, the
+maintainer handles the design and implementation.
 
 [**New issue**](https://github.com/NorthwoodsSentinel/mycelia-mcp/issues/new/choose)
 offers a **Bug report** and a **Feature request** form. Blank issues are
@@ -82,12 +83,12 @@ Please don't send a diff or open a pull request. Instead, open an issue that
 includes:
 
 - **The prompt(s) you used** to generate the change — the exact text, so it can
-  be reproduced through the workflow here.
+  be reproduced through the workflow here if the issue is taken up.
 - **A description of the behavior before and after** your change.
 - **How you verified it** (steps you ran, tests you added, what you observed).
 
-The change is then reproduced through the pipeline so it arrives with the right
-conventions, tests, and coverage.
+If the issue is taken up, the change is reproduced through the pipeline so it
+arrives with the right conventions, tests, and coverage.
 
 ## What makes a good issue or prompt submission
 

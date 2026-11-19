@@ -55,8 +55,8 @@ body:
       label: Already built it locally?
       description: >
         Please don't attach a diff or open a pull request — share the **exact
-        prompt(s)** you used. The work is reproduced through the workflow here
-        so it arrives with the right conventions, tests, and coverage.
+        prompt(s)** you used. If it is taken up, the work is reproduced through
+        the workflow here with the right conventions, tests, and coverage.
     validations:
       required: false
 
