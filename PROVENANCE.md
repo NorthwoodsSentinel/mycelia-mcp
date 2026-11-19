@@ -57,6 +57,27 @@ a `Todo` move. One more, specific to Linear and recorded in `board-ops`:
 `assignee: "me"` resolves to the connector's account, so it cannot tell agents
 apart.
 
+## Contribution policy, issue forms and security policy
+
+Copied from the Inspector at `eb54b44` (blob ids read with
+`git rev-parse eb54b44:<path>`), then edited. The policy is the source's:
+issues, not pull requests; a prompt rather than a diff; no public form for a
+vulnerability.
+
+| This repo | Source (Inspector) | Git blob id | Edits |
+| --- | --- | --- | --- |
+| `CONTRIBUTING.md` | `CONTRIBUTING.md` (154 lines) | `1976d078e00fcaedfdedbd235693f0d056d761fa` | One maintainer, not a team. The conventions named are this repo's gate, not the source's component rules. Left out because they are not true here: the two version lines and their labels, the Discord, the community calls, the code-of-conduct link, the three clients. Added: pull requests reference the tracker's `NOR-<number>`, and a GitHub issue that is taken up is linked to its tracked item; a pointer to `SECURITY.md`; the maintainer decides which issues are taken up (the source says a maintainer will pick one up); an issue is public, so keys, secrets and private details are removed before pasting, including from a prompt. |
+| `SECURITY.md` | `SECURITY.md` (53 lines) | `f0ec359ff180a1d2529d9b9368799bead446ae29` | One supported line, `main`. The advisory link is this repository's. Added: never put a live agent key in a report. |
+| `.github/pull_request_template.md` | same path (35 lines) | `5ce2a7ee1be017ec83f501e203783377a4291843` | This repo's links; the version-label line and the Discord paragraph left out; a line for a vulnerability; the maintainer note names `Closes NOR-<number>`; absolute links, since the banner is rendered as a pull request body; a prompt is shared with keys, secrets and private details replaced by placeholders; "if it is taken up". |
+| `.github/ISSUE_TEMPLATE/config.yml` | same path (57 lines) | `f2dddef164352dcb65e2daff7a1ef4c6defb3730` | This repo's links; the Discord link left out. |
+| `.github/ISSUE_TEMPLATE/1-bug_report.yml` | same path (163 lines) | `fa6b804c2f5af0f24fa8505b77a8c68efbde30ff` | Fields for this server: which tool, the commit or version, Bun version, the MCP host. Left out: version line, client, transport (stdio only), Node version, screenshots. Added: a public-issue warning, placeholders for a home-directory path and an agent name, and a required box that keys, secrets and private details were removed, including from any prompt. |
+| `.github/ISSUE_TEMPLATE/2-feature_request.yml` | same path (88 lines) | `a5d3fefcb8ce14d13168e11dea40cf14e26942d0` | The client dropdown and the `v2` label left out; the checkbox names this server. Added: the same public-issue warning and required box as the bug form, since a pasted prompt can carry a key. |
+| `AGENTS.md` Contributing | Inspector `AGENTS.md`, Contributing | — | The source's two paragraphs (issues not pull requests; the forms and no security template), with this repo's facts. Added: a GitHub issue from outside becomes a Linear ticket when the owner takes it up, and the two are linked. |
+
+Two repository settings make these files true, and both are the owner's to
+set: pull-request creation limited to collaborators, and private vulnerability
+reporting enabled.
+
 ## Changes to the server's own code
 
 - `src/index.ts`: `TOOLS`, `asContent`, `createServer`, `main` and `fatal`
