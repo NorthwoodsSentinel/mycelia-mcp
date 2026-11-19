@@ -53,7 +53,13 @@ A change that adds a skill under `.claude/skills/<name>/SKILL.md` adds its row t
 
 ## Contributing
 
+External contributions are accepted as **issues, not pull requests** — the owner handles design and implementation through a prompt-driven workflow. If someone has already built a change locally, they share the **prompt** they used, not a diff. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full policy. Pull-request creation is limited to collaborators in the repository's settings; that setting, like every repository setting, is the owner's.
+
 **The owner picks the work.** This repository is public: a pull request here is opened by an agent and merged by the owner, never by an agent.
+
+**Issues from outside are filed through the forms in [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLATE) — blank issues are disabled.** There are two forms, **Bug report** (`1-bug_report.yml`, auto-labels `bug`) and **Feature request** (`2-feature_request.yml`, auto-labels `enhancement`); `config.yml` holds the chooser's contact links. **There is deliberately no security template**: a vulnerability report must not open a public issue, so the chooser routes it to the private advisory form as a contact link instead (see [`SECURITY.md`](./SECURITY.md)). When adding or changing a form, validate it against GitHub's issue-forms schema (`markdown` blocks take no `id` and no `validations`; `checkboxes` mark `required` per option, not under `validations`).
+
+**A GitHub issue from outside is a report, not yet a ticket.** When the owner takes one up it gets a Linear ticket of its own, with the GitHub issue linked in the ticket and the ticket's `NOR-<NUMBER>` posted on the GitHub issue. Work then follows the ticket, as everything else here does.
 
 **Every PR must reference an issue. No exceptions, regardless of who opens it.** The PR body's first line references the tracking issue (see the [Issue-driven Work Style](#issue-driven-work-style) rules below). If you're about to open one and there's no issue yet, create the issue first. This holds for a one-line fix as much as for a feature.
 
