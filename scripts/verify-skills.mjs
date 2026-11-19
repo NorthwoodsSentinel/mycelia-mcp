@@ -6,12 +6,15 @@
 // edits, all for this repo's facts:
 //   - The wiring vouch (`checkWiring`) asks this repo's questions: CI here is
 //     `.github/workflows/main.yml`, which runs `npm run validate`, and this
-//     guard runs inside `validate`. There is no `verify:skills:cli` stage here
-//     yet, so the links that named it name `verify:skills` instead.
-//   - The bonus run of `claude plugin validate` is removed, with its imports
-//     (`scripts/lib/claude-cli.mjs` and its Windows helper are not copied).
-//   - No `skills:eval` script exists here; running eval cases spends model
-//     calls, which is the owner's to approve.
+//     guard runs inside `validate`. The links the source asks of
+//     `verify:skills:cli` are asked of `verify:skills` too; the source's two
+//     links for `verify:skills:cli` itself (local:gate and CI) are kept beside
+//     them, now that this repo has the stage (`scripts/verify-skills-cli.mjs`).
+//   - The bonus run of `claude plugin validate` stays removed: it runs as its
+//     own guaranteed stage, `verify:skills:cli`, as the source also does.
+//   - `skills:eval` (`scripts/skill-eval.mjs`, the Inspector's) spends model
+//     calls, so it is run by hand; `checkEvalNotWired` (added here) fails if a
+//     gate or CI could start it.
 //   - The entry check uses `isMainModule` (lib/main-module.mjs).
 // Record: PROVENANCE.md.
 //
@@ -41,14 +44,18 @@
 //      entries first — which are exactly the model-invoked skills.
 //
 // (The source additionally runs `claude plugin validate` at a pinned CLI
-// version, and has a `verify:skills:cli` stage that guarantees it. Neither is
-// here yet; see the header.)
+// version, and has a `verify:skills:cli` stage that guarantees it. Here the
+// stage exists; the in-`validate` bonus run does not. See the header.)
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainModule } from "./lib/main-module.mjs";
-import { rootReachesScript, scriptChainRuns } from "./lib/npm-scripts.mjs";
+import {
+  reachableScripts,
+  rootReachesScript,
+  scriptChainRuns,
+} from "./lib/npm-scripts.mjs";
 import { parse as parseYaml } from "yaml";
 import {
   parseSkill,
@@ -202,10 +209,14 @@ export const GUARDS_WORKFLOW = path.join(".github", "workflows", "main.yml");
  *     source the two vouch for each other; `verify:action-pins` here does not
  *     yet vouch back, a follow-up.)
  *   - `local:gate` must reach this guard. The source asks this of
- *     `verify:skills:cli`, a stage this repo does not have; here this guard
- *     runs inside `validate`, which `local:gate` runs.
+ *     `verify:skills:cli`; here this guard runs inside `validate`, which
+ *     `local:gate` runs, and `local:gate` must reach `verify:skills:cli` too.
  *   - CI must run it on a PR: `main.yml` must have an unconditional step that
- *     runs `npm run validate`, and `validate` must reach `verify:skills`.
+ *     runs `npm run validate`, and `validate` must reach `verify:skills`; and
+ *     an unconditional step must run `npm run verify:skills:cli`.
+ *
+ * Nothing a gate or CI runs may reach the model-spending eval
+ * (`checkEvalNotWired`, below).
  *
  * The workflow half must find a step that **actually runs on a PR**, which takes
  * two narrowings beyond a text search:
@@ -252,7 +263,83 @@ export function checkWiring(rootScripts, workflowText) {
       `\`${GUARDS_WORKFLOW}\` does not run on \`pull_request\`, so a PR is merged with no gate run on it. Restore the trigger.`,
     );
   }
+  // The source's two links for the authoritative validator.
+  if (!scriptChainRuns(rootScripts, "local:gate", "verify:skills:cli")) {
+    problems.push(
+      "`npm run local:gate` no longer runs `verify:skills:cli`, so the authoritative validator does not run before a push. Restore it.",
+    );
+  }
+  if (!ciRunsUnconditionally(workflowText, "npm run verify:skills:cli")) {
+    problems.push(
+      `\`${GUARDS_WORKFLOW}\` has no unconditional step that runs \`npm run verify:skills:cli\`, so the authoritative validator does not run on a PR. Restore it (a step behind an \`if:\`, or in a release-only job, does not count).`,
+    );
+  }
+  problems.push(...checkEvalNotWired(rootScripts, workflowText));
   return problems;
+}
+
+/** Text that names the model-spending eval, as a script or as its file. */
+// `skill-eval.mjs`, not `skill-eval`: the eval's own unit tests
+// (`skill-eval.test.mjs`, stubbed, no model call) run in `test:scripts`, and a
+// bare `skill-eval` would flag them.
+const EVAL_NAMES = ["skills:eval", "skill-eval.mjs"];
+
+/**
+ * Local addition: the eval spends metered model calls, so nothing a gate or CI
+ * runs may start it; it is run by hand. The claim this proves is deliberately
+ * narrow: no npm script reachable from `validate`, `local:gate`, or any npm
+ * script a workflow step names, and no workflow step's `run:` text, names
+ * `skills:eval` or `skill-eval.mjs`. Reachability here is `reachableScripts`, which
+ * follows every `npm run` substring, so it over-includes: a mention in an
+ * `echo` counts. That is the safe direction for a "must not reach" check (a
+ * false failure is obvious to fix). NOT covered: a script that starts the eval
+ * through some other file (a shell script, a Node script that spawns it), or a
+ * workflow in another file. A reviewer reads those diffs.
+ *
+ * @param {Record<string, string>} rootScripts
+ * @param {string} workflowText
+ * @returns {string[]} problems
+ */
+export function checkEvalNotWired(rootScripts, workflowText) {
+  const problems = [];
+  const names = (text) => EVAL_NAMES.filter((n) => text.includes(n));
+  const entries = new Set(["validate", "local:gate"]);
+  let doc;
+  try {
+    doc = parseYaml(workflowText);
+  } catch {
+    doc = null;
+  }
+  const runs = [];
+  for (const job of Object.values(doc?.jobs ?? {})) {
+    for (const step of Array.isArray(job?.steps) ? job.steps : []) {
+      if (typeof step?.run === "string") runs.push(step.run);
+    }
+  }
+  for (const run of runs) {
+    for (const n of names(run)) {
+      problems.push(
+        `\`${GUARDS_WORKFLOW}\` names \`${n}\` in a step's \`run:\`. The skill eval spends model calls and is run by hand only; remove it from CI.`,
+      );
+    }
+    for (const m of run.matchAll(/npm (?:run-script|run|rum|urn) ([\w:-]+)/g))
+      entries.add(m[1]);
+  }
+  for (const entry of entries) {
+    for (const script of reachableScripts(rootScripts, entry)) {
+      const body = rootScripts?.[script];
+      const hits = [
+        ...(EVAL_NAMES.includes(script) ? [script] : []),
+        ...(typeof body === "string" ? names(body) : []),
+      ];
+      for (const n of new Set(hits)) {
+        problems.push(
+          `\`npm run ${entry}\` reaches \`${n}\` (via \`${script}\`). The skill eval spends model calls and is run by hand only; take it out of the gate.`,
+        );
+      }
+    }
+  }
+  return [...new Set(problems)];
 }
 
 /**

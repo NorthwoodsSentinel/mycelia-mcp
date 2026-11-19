@@ -9,8 +9,10 @@
 # One job runs every stage of `npm run local:gate`, the command a developer
 # runs before pushing, except `local:dco`: `validate` (pin guard, skills
 # guard, format check, lint, typecheck, the script tests and the Vitest tests
-# with per-file coverage), then `smoke` (the pinned MCP Inspector over stdio,
-# against a fake Mycelia API on 127.0.0.1). `local:dco` reads `origin/main`,
+# with per-file coverage), then `verify:skills:cli` (the authoritative
+# `claude plugin validate` at the pinned CLI, the Inspector's own stage), then
+# `smoke` (the pinned MCP Inspector over stdio, against a fake Mycelia API on
+# 127.0.0.1). `local:dco` reads `origin/main`,
 # which this shallow checkout does not have, so it stays local (the
 # Inspector's reason, its docs/quality-gate.md); a pull request's commits are
 # checked by .github/workflows/dco.yml instead.
@@ -90,5 +92,7 @@ jobs:
 
       - name: Run the gate (every stage of local:gate but the local-only local:dco)
         # `smoke` fetches the pinned Inspector with `npx` from the public npm
-        # registry; it needs network access and no secret.
-        run: npm run validate && npm run smoke
+        # registry; it needs network access and no secret. So does
+        # `verify:skills:cli`, which fetches the pinned @anthropic-ai/claude-code
+        # with `npx -y` and needs no authentication.
+        run: npm run validate && npm run verify:skills:cli && npm run smoke
