@@ -16,7 +16,9 @@
 
   If you've already built the change locally:
     → Open an issue and share the PROMPT(S) you used to generate it, not a
-      diff. If it is taken up, it is reproduced through the workflow here.
+      diff, with any key, secret or private detail replaced by a
+      placeholder. If it is taken up, it is reproduced through the workflow
+      here.
 
   If you've found a security vulnerability:
     → Do not open a pull request or a public issue. See

@@ -83,7 +83,9 @@ Please don't send a diff or open a pull request. Instead, open an issue that
 includes:
 
 - **The prompt(s) you used** to generate the change — the exact text, so it can
-  be reproduced through the workflow here if the issue is taken up.
+  be reproduced through the workflow here if the issue is taken up. **An issue
+  is public: replace any key, secret or private detail in a prompt with a
+  placeholder before you paste it.**
 - **A description of the behavior before and after** your change.
 - **How you verified it** (steps you ran, tests you added, what you observed).
 
@@ -104,10 +106,12 @@ A great submission gives everything needed to act without a round-trip:
   `mycelia_my_outgoing`, `mycelia_post_request`), or "all" / "startup" if it is
   not specific to one.
 - **Environment details** when relevant — OS, Bun version, the MCP host you
-  ran the server under, and any relevant configuration. **Redact your Mycelia
-  agent key and any other secret before you paste anything.**
+  ran the server under, and any relevant configuration. **Remove your Mycelia
+  agent key, any other secret, and anything private (a home-directory path, a
+  host name, an agent's name) before you paste anything.**
 - **The exact prompt text**, if you generated a local change and want it
-  reproduced.
+  reproduced — with keys, secrets and private details replaced by
+  placeholders.
 
 ## Questions
 

@@ -21,6 +21,10 @@ body:
         So please describe the problem first, and treat the solution section as
         one possible answer rather than the request itself.
 
+        > 🔑 **This issue is public.** Remove your Mycelia agent key, any other
+        > secret, and anything private (a home-directory path, a host name, an
+        > agent's name) from everything you paste below — including a prompt.
+
   - type: textarea
     id: problem
     attributes:
@@ -55,8 +59,10 @@ body:
       label: Already built it locally?
       description: >
         Please don't attach a diff or open a pull request — share the **exact
-        prompt(s)** you used. If it is taken up, the work is reproduced through
-        the workflow here with the right conventions, tests, and coverage.
+        prompt(s)** you used, with any key, secret or private detail in them
+        replaced by a placeholder. If it is taken up, the work is reproduced
+        through the workflow here with the right conventions, tests, and
+        coverage.
     validations:
       required: false
 
@@ -68,4 +74,6 @@ body:
         - label: I searched existing issues and this is not a duplicate.
           required: true
         - label: This is a request for mycelia-mcp itself, not for the MCP specification, an SDK, or the Mycelia service.
+          required: true
+        - label: I removed my Mycelia agent key, any other secret, and any private detail from this request, including from any prompt.
           required: true

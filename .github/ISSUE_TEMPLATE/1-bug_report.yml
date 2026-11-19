@@ -22,8 +22,9 @@ body:
         > [private advisory process](https://github.com/NorthwoodsSentinel/mycelia-mcp/security/advisories/new)
         > instead — see [`SECURITY.md`](https://github.com/NorthwoodsSentinel/mycelia-mcp/blob/main/SECURITY.md).
 
-        > 🔑 **Redact your Mycelia agent key** and any other secret from
-        > everything you paste below.
+        > 🔑 **This issue is public.** Remove your Mycelia agent key, any other
+        > secret, and anything private (a home-directory path, a host name, an
+        > agent's name) from everything you paste below — including a prompt.
 
   - type: dropdown
     id: tool
@@ -78,12 +79,14 @@ body:
       description: >
         What ran the server — the MCP host or client and its version, and how
         the server is configured in it (the command, and the names of the
-        environment variables you set). Redact the values of any key or token.
+        environment variables you set). Never paste the value of a key or a
+        token. Write a home-directory path as `~/...`, and write `<NAME>` in
+        place of your agent's name, as the example does.
       placeholder: |
         Host: Claude Code 2.1.250
-        Command: bun /path/to/mycelia-mcp/src/index.ts
+        Command: bun ~/mycelia-mcp/src/index.ts
         Environment: MYCELIA_MCP_AGENT_NAME, MYCELIA_PERSONAL_AGENT_ID_<NAME>,
-          MYCELIA_PERSONAL_KEY_<NAME> (value redacted), MYCELIA_PERSONAL_API_BASE
+          MYCELIA_PERSONAL_KEY_<NAME>, MYCELIA_PERSONAL_API_BASE (names only, no values)
     validations:
       required: true
 
@@ -121,7 +124,8 @@ body:
       label: Logs or errors
       description: >
         The tool's returned error, the host's log for this server, or the
-        server's stderr. Redact keys, tokens and secrets first.
+        server's stderr. Remove keys, tokens, secrets, home-directory paths,
+        host names and agent names first.
     validations:
       required: false
 
@@ -131,7 +135,8 @@ body:
       label: Already prototyped a fix?
       description: >
         Please don't attach a diff or open a pull request — share the **exact
-        prompt(s)** you used to produce the change, plus what you verified. If
+        prompt(s)** you used to produce the change, with any key, secret or
+        private detail in them replaced by a placeholder, plus what you verified. If
         it is taken up, it is reproduced through the workflow here with the right
         conventions, tests, and coverage.
     validations:
@@ -146,5 +151,5 @@ body:
           required: true
         - label: This is not a security vulnerability report (those go through the private advisory process).
           required: true
-        - label: I removed my Mycelia agent key and any other secret from this report.
+        - label: I removed my Mycelia agent key, any other secret, and any private detail (home-directory path, host name, agent name) from this report, including from any prompt.
           required: true
