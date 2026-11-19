@@ -31,10 +31,11 @@ save_issue  id: "NOR-<n>"  state: "<state>"
 get_issue   id: "NOR-<n>"          # confirm the state
 ```
 
-Three target states have a precondition. Check it first; if it does not hold, **do not move the issue**: say which precondition failed.
+Four target states have a precondition. Check it first; if it does not hold, **do not move the issue**: say which precondition failed.
 
 - **`Todo`**: the owner's explicit word to move this issue, or the issue is a follow-up you filed **inside** a parent the owner already approved. Name which one you relied on. Otherwise it stays in `Backlog`.
 - **`In Progress`**: only from **`Todo`**. An agent starts work only on an approved ticket (`AGENTS.md`), and assigning a ticket is not approving it. Read the current state first (`get_issue`): if it is `Backlog`, stop; the move to `Todo` is the owner's, or the approved-parent case above. Then set `assignee: "me"` in the same `save_issue` call, and confirm both the state and the assignee in the read-back.
+- **`In Review`**: only when a pull request for this issue is **open** in `NorthwoodsSentinel/mycelia-mcp`, with `Closes NOR-<n>` as its body's first line (`gh pr view <pr> -R NorthwoodsSentinel/mycelia-mcp --json state,body`; `state` is `OPEN`). No open PR, no move.
 - **`Done`**: all of these hold, checked, not assumed:
   1. A pull request in `NorthwoodsSentinel/mycelia-mcp` whose body's **first line** is `Closes NOR-<n>` for this issue (`gh pr view <pr> -R NorthwoodsSentinel/mycelia-mcp --json body,state,baseRefName,mergeCommit`);
   2. its `state` is `MERGED` and its `baseRefName` is `main` (the owner merges here; an agent never does, `AGENTS.md`);
@@ -48,7 +49,7 @@ Linear refuses the `Duplicate` state unless a duplicate relation exists. Setting
 
 ```
 save_issue  id: "NOR-<later>"  duplicateOf: "NOR-<earlier>"
-get_issue   id: "NOR-<later>"           # confirm state Duplicate and the relation
+get_issue   id: "NOR-<later>"  includeRelations: true   # confirm state Duplicate and the relation
 ```
 
 Before closing it, put anything worth keeping from the later issue into the earlier one as a comment.
@@ -56,11 +57,13 @@ Before closing it, put anything worth keeping from the later issue into the earl
 ## Close as Canceled
 
 ```
-save_issue  id: "NOR-<n>"  state: "Canceled"
-get_issue   id: "NOR-<n>"
+save_comment   issueId: "NOR-<n>"  body: "<why nothing shipped>"
+save_issue     id: "NOR-<n>"  state: "Canceled"
+get_issue      id: "NOR-<n>"          # confirm the state
+list_comments  issueId: "NOR-<n>"     # confirm the reason comment is there; get_issue does not show it
 ```
 
-Leave a comment saying why first. `Canceled` is "nothing shipped", never "done another way".
+The reason comment comes first, and a cancel without one is not done. `Canceled` is "nothing shipped", never "done another way".
 
 ## Edit labels
 
