@@ -121,18 +121,33 @@ gh api repos/NorthwoodsSentinel/mycelia-mcp/security-advisories/<GHSA_ID> \
 
 `private_fork=none` with `exit=0` means there is no fork yet: ask the owner to create it from the advisory's page ("Start a temporary private fork"). A non-zero exit means the read failed. ⚠️ Deleting a private fork needs a permission a default `gh` token does not carry, so a fork made by mistake is not quietly undone. That is the reason for the read-only rule.
 
-**Work in a worktree cut for this fix, and give the fork as its only push target.** The fork is private, so pushing to it is not a public act; it is also the only remote the fix may reach before step 5. Before the first push, read the push URL and confirm it names the fork and not this repository:
+**Work in a worktree cut for this fix. The fork is a remote of its own, named `advisory`; `origin` stays this repository and is not pushed to before step 5.** The fork is private, so pushing to it is not a public act; it is also the only remote the fix may reach before step 5.
+
+- Cut the branch from `main`'s current commit, named `nor-<N>-<slug>`: `<N>` is the `[SEC]` ticket and the slug describes the change, not the exploit. Step 5 publishes this name.
+- Add the remote once: `git remote add advisory <the fork's clone URL>`.
+- **Every push before step 5 goes through this block**, which pushes only when `advisory` is the fork the advisory itself names:
 
 ```sh
-git remote get-url --push <the remote you are about to push to>
+BR=nor-<N>-<slug>
+FORK=$(gh api repos/NorthwoodsSentinel/mycelia-mcp/security-advisories/<GHSA_ID> --jq '.private_fork.full_name // ""'); rc=$?
+URL=$(git remote get-url --push advisory); URL=${URL%.git}
+if [ "$rc" -ne 0 ] || [ -z "$FORK" ]; then
+  echo "NO PUSH: no fork read from the advisory (exit=$rc; 0 means it has none yet, anything else means the read failed)"
+else
+  case "$URL" in
+    */"$FORK" | *:"$FORK") git push -u advisory "$BR"; echo "pushed to the fork, exit=$?" ;;
+    *) echo "NO PUSH: advisory is $URL, which is not the fork $FORK" ;;
+  esac
+fi
 ```
 
-- Cut the branch from `main`'s current commit.
+`-u advisory` makes the fork this branch's upstream, so a bare `git push` goes there too. ⚠️ Never `git push origin` and never `git push -u origin` before step 5: that is `/pr-flow`'s push command, and here it publishes the patch.
+
 - Write the fix and its tests. `npm run local:gate` runs locally, as always; ⚠️ **a private fork runs no Actions**, so there is no CI result there, and the local gate is the only gate until step 5.
 - The fork's pull request is where the owner **reads** the fix. It is never where the fix is merged.
 - Sign off every commit (`/pr-flow`, step 3): step 5 pushes these commits unchanged.
 
-**Move the ticket as the work moves** (`/board-ops`): **`In Progress`** when the fix is started, from `Todo`; **`In Review`** when the fork's pull request is open. The ticket being private is the reason to do it: the fork is invisible to everyone not on the advisory, and this ticket is the only record that the work exists. ⚠️ `/board-ops`' `In Review` check looks for an open pull request in **this** repository; for a `[SEC]` ticket in step 4 the open pull request is the fork's. Say so on the ticket when you make the move.
+**The ticket through step 4** (`/board-ops`): **`In Progress`** when the fix is started, from `Todo`, and it **stays `In Progress` until step 5**. `/board-ops` allows `In Review` only when a pull request is open in **this** repository, and before step 5 there is none: the open pull request is the fork's. So record the fork's pull request on the ticket as a comment, with its link, when it opens. The ticket being private is the reason to do it: the fork is invisible to everyone not on the advisory, and the ticket is the only record that the work exists. `In Review` comes in step 5, when the public pull request is open, by `/pr-flow` as for any other ticket.
 
 ### 5. Land the fix, then publish
 
@@ -142,8 +157,36 @@ git remote get-url --push <the remote you are about to push to>
 
 When the owner says so:
 
-1. **Push the fork's branch to this repository** under an ordinary name, `nor-<N>-<slug>`, where `<N>` is the `[SEC]` ticket and the slug describes the change, not the exploit. Push the fork's commits unchanged.
-2. **Open an ordinary PR** with `/pr-flow`, from its step 5 on: `Closes NOR-<N>` first, the `factory` label, the gate result on that commit. Say in the body that the fix was developed and reviewed in the advisory's private fork. **Keep the title and the description to the fix**: what the advisory will disclose is the advisory's to say. Leave out the reproduction, any proof of concept, and the reporter's details.
+1. **Push the branch to this repository with the block below, not with `/pr-flow`'s push command.** It pushes the commits the fork holds, unchanged, and only when the name is free here, `origin` is this repository, and the fork already holds the same commit:
+
+```sh
+BR=nor-<N>-<slug>
+HEAD_SHA=$(git rev-parse HEAD)
+URL=$(git remote get-url --push origin); URL=${URL%.git}
+FORK_SHA=$(git ls-remote advisory "refs/heads/$BR" | cut -f1)
+git ls-remote --exit-code --heads origin "$BR" >/dev/null 2>&1; rc=$?
+case "$URL" in */NorthwoodsSentinel/mycelia-mcp | *:NorthwoodsSentinel/mycelia-mcp) ORIGIN_OK=yes ;; *) ORIGIN_OK=no ;; esac
+if [ -n "$(git status --porcelain)" ]; then
+  echo "NO PUSH: the tree is not clean"
+elif [ "$ORIGIN_OK" != yes ]; then
+  echo "NO PUSH: origin is $URL, which is not this repository"
+elif [ "$rc" -ne 2 ]; then
+  echo "NO PUSH: ls-remote exit=$rc; a branch named $BR is already in this repository (0), or the read failed"
+elif [ "$FORK_SHA" != "$HEAD_SHA" ]; then
+  echo "NO PUSH: the fork's $BR is not at HEAD; the reviewed commits and these differ"
+else
+  git push origin "$HEAD_SHA:refs/heads/$BR"; prc=$?
+  SEEN=$(git ls-remote origin "refs/heads/$BR" | cut -f1)
+  if [ "$prc" -eq 0 ] && [ "$SEEN" = "$HEAD_SHA" ]; then
+    echo "public branch $BR is at $HEAD_SHA"
+  else
+    echo "NO PR: push exit=$prc, or the public branch is not at $HEAD_SHA"
+  fi
+fi
+```
+
+   Go on only from the line `public branch … is at …`. `git ls-remote --exit-code` exits 2 when no branch of that name exists, which is the one result that allows the push. A fix pushed later in the review loop goes the same way, by name: `git push origin "HEAD:refs/heads/$BR"`; the branch's upstream is still the fork.
+2. **Open an ordinary PR** with `/pr-flow`, taking up its step 5 **after** its push command (the block above stood in for it): `gh pr create` with `--head nor-<N>-<slug>`, `Closes NOR-<N>` first, the `factory` label, the gate result on that commit. `/pr-flow` then moves the ticket to `In Review`. Say in the body that the fix was developed and reviewed in the advisory's private fork. **Keep the title and the description to the fix**: what the advisory will disclose is the advisory's to say. Leave out the reproduction, any proof of concept, and the reporter's details.
 3. **Run the Codex loop** (`/pr-flow`, step 6). The diff is public now, so this is the first point the review model may see it. Its subject carries the fix, not the report.
 4. **Hand it to the owner** (`/pr-flow`, step 7). The owner merges.
 5. **Then the owner publishes the advisory.** ⚠️ **Publishing is irreversible.** It makes the advisory public and there is no undo. Before publishing, remind the owner of the two things publishing will not do by itself: requesting a **CVE** (optional, and the advisory is the only place to ask) and **adding the reporter to the credits**. A credit is an explicit addition the person then has to accept, so an unadded reporter is simply never credited, and nothing reports that it was missed.
