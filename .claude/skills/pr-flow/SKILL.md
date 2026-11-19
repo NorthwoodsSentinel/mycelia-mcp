@@ -67,7 +67,16 @@ A sign-off certifies the commit in **your own name**. Never fabricate someone el
 
 ## 4. Run the gate
 
-`npm run format`, then `npm run local:gate`. `npm run validate` is **not** a substitute (`AGENTS.md`, Mandatory pre-push gate). The gate is judged by its exit code, read directly: a pipe into `tail` or `grep` reports the pipe's exit code and hides the gate's.
+`npm run format`, **commit**, then `npm run local:gate`. `npm run validate` is **not** a substitute (`AGENTS.md`, Mandatory pre-push gate).
+
+⚠️ **A gate result belongs to a commit only when the tree was clean.** The gate reads the working tree, not the commit: a repair left uncommitted passes the gate while the commit that gets pushed is still broken. So:
+
+```sh
+[ -z "$(git status --porcelain)" ] && GATED=$(git rev-parse HEAD) && npm run local:gate; echo "gate exit=$?"
+[ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" = "$GATED" ] && echo "gate passed on $GATED"
+```
+
+No `gate passed on` line, no push. `$GATED` is the only commit the result covers; if anything is committed afterwards, run it again. The gate is judged by its exit code, read directly: a pipe into `tail` or `grep` reports the pipe's exit code and hides the gate's.
 
 ## 4a. Evidence, in place of screenshots
 
@@ -83,7 +92,7 @@ This repo has no UI, so the source's screenshot step is **evidence** (`AGENTS.md
 
 ## 5. Open the PR
 
-**The order is fixed, and `/board-ops` cannot check most of it:** `npm run format`; `npm run local:gate` exits 0 on the commit you are about to push; every commit is signed off; push; open the PR; only then move the ticket to `In Review`. `/board-ops` checks that an open PR exists. It cannot see whether the gate ran. A ticket `In Review` on a head the gate never passed broke `AGENTS.md` (When work is complete).
+**The order is fixed, and `/board-ops` cannot check most of it:** `npm run format`; `npm run local:gate` exits 0 on the commit you are about to push; every commit is signed off; push **that same commit** (`git rev-parse HEAD` still equals the `$GATED` of step 4); open the PR; only then move the ticket to `In Review`. `/board-ops` checks that an open PR exists. It cannot see whether the gate ran. A ticket `In Review` on a head the gate never passed broke `AGENTS.md` (When work is complete).
 
 Target **`main`**. The body's **first line is `Closes NOR-<N>`**, and the body carries the evidence from 4a. The PR gets the process label **`factory` at creation**, never backfilled (`AGENTS.md`).
 
@@ -152,8 +161,7 @@ Codex posts no inline review threads here. **Post one PR comment per round** tha
 | was **pass** with no findings | **Stop.** One clean round is the end. No confirming round "just to be sure". |
 | was **fail** with an in-scope finding you fixed and pushed | Run another round on the **new** head. |
 | was **fail** holding only findings you declined as out of scope | **Stop.** Nothing changed; another round only re-argues scope. Say so in the PR comment: accepting the declined findings is the owner's decision at merge. |
-| was **no verdict** | Run once more. **Two no-verdict rounds in a row:** stop and report it, because Codex is not producing audits. |
-| was **timeout** | **Stop and report the round as unfinished.** Find out why before running again. |
+| was **no verdict** or **timeout** | A round that ended without an audit. Find out why first (a budget too small, a hung process, a bad subject), then run once more. **Two such rounds in a row, of either kind:** stop and report it, because Codex is not producing audits (`AGENTS.md`: two rounds in a row that end without posting). One alone never ends the loop. |
 
 **Two consecutive fail rounds** don't end the loop. Re-read the ticket's goal before the next repair round, and say so in the PR.
 
@@ -163,29 +171,40 @@ When the loop stops, post a PR comment saying which exit fired. ⚠️ **If a co
 
 **An agent never merges a pull request in this repository** (`AGENTS.md`, Contributing; Only the owner does). The agent's last act before the merge is to say, with evidence, what the owner is merging.
 
-Check these on the head, and report each as read, not as assumed:
+**Resolve the head once, read everything against that one SHA, then confirm the head has not moved.** Checks read for one commit and a merge command written for another is a report about the wrong thing.
+
+Check these on that head, and report each as read, not as assumed:
 
 - **The checks are green on the head, from the real workflows:** `validate` and `DCO` are **check runs from the `github-actions` app**, `completed`, with conclusion `success`.
   - A missing, pending, neutral or failed one is reported as that. Only the push-only `DCO (main push)` job may be `skipped` on a PR.
   - ⚠️ Read **every page** (`--paginate`). A first page alone can miss a check run.
   - ⚠️ Read the check runs **with their app**. A commit **status** named `validate` or `DCO` on that SHA is not one of these check runs: report it, and do not count it as green.
+  - ⚠️ **The app and the name do not prove the workflow.** A PR that changes `.github/workflows/` is checked by the definitions it changes, so a green `validate` or `DCO` on it says nothing about the workflows on `main`. Say whether the PR touches that folder. If it does, say so first in the hand-off, and say that its checks are not evidence until the owner has read the workflow diff.
 - **The last Codex round**: its verdict, the SHA it audited, and which exit of 6c fired. Every declined finding, with its ticket.
 - **GitHub reports `mergeable: MERGEABLE` and `mergeStateStatus: CLEAN`.** `MERGEABLE` alone only means no conflicts.
 - **Anything the change needs that only the owner can do**: a repository setting, a label, a secret. Name each one and its current value, read from the API.
 - **What evidence was and was not run** (step 4a).
 
 ```sh
-gh api --paginate repos/NorthwoodsSentinel/mycelia-mcp/commits/<SHA>/check-runs \
+R=NorthwoodsSentinel/mycelia-mcp
+HEAD_SHA=$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)
+gh api --paginate repos/$R/commits/$HEAD_SHA/check-runs \
   --jq '.check_runs[] | "\(.name) app=\(.app.slug) \(.status) \(.conclusion)"'
-gh api --paginate repos/NorthwoodsSentinel/mycelia-mcp/commits/<SHA>/statuses \
+gh api --paginate repos/$R/commits/$HEAD_SHA/statuses \
   --jq '.[] | select(.context == "validate" or .context == "DCO") | .context'   # expect no output
-gh pr view <PR> -R NorthwoodsSentinel/mycelia-mcp --json headRefOid,mergeable,mergeStateStatus
+git fetch origin && git diff --quiet origin/main...$HEAD_SHA -- .github/workflows/ \
+  && echo "workflows unchanged by this PR" || echo "THIS PR CHANGES THE WORKFLOWS"
+gh pr view <PR> -R $R --json mergeable,mergeStateStatus
+[ "$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)" = "$HEAD_SHA" ] \
+  && echo "head unchanged: $HEAD_SHA"
 ```
+
+**No `head unchanged` line, no hand-off.** The head moved while you were reading: start this step again. The audited SHA of step 6 is compared with `$HEAD_SHA` too, and a difference is reported, not smoothed over.
 
 Then give the owner the merge as **one command** that refuses a head that moved:
 
 ```sh
-gh pr merge <PR> -R NorthwoodsSentinel/mycelia-mcp --merge --match-head-commit <the head SHA you reported>
+gh pr merge <PR> -R NorthwoodsSentinel/mycelia-mcp --merge --match-head-commit <that HEAD_SHA, written out in full>
 ```
 
 The ticket stays `In Review` until the merge. Do not run that command yourself.
