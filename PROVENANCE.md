@@ -76,6 +76,21 @@ MCP reference servers' adaptation of the Inspector's screenshot rule
 | `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the evidence rule; the exception in Only the owner does | Inspector `AGENTS.md` ("Attach screenshots as proof of functionality"); servers inception doc, section 3.2 | — | The index row; the intro names `pr-flow`; a new rule, client evidence in place of screenshots, so the evidence step is a rule here and not only a step in a skill. "Only the owner does" listed anything public as the owner's while Contributing has an agent open pull requests and run the review; the owner settled it on 2026-11-19 with a named exception for four acts (push a branch, open a pull request, comment on it, send the diff to the review model), written into that list (Codex audit of `36d5b04`, finding 1). |
 | `.claude/skills/board-ops/SKILL.md`, and its index row | (already recorded above) | — | Three wording fixes: the description and the index row name all four preconditioned states (`In Review` was added to the skill and not to its summaries); in "Close as Duplicate" the instruction to save anything worth keeping now comes before the step that closes the issue. |
 
+## Security advisory
+
+Copied from the Inspector at `eb54b44` (the skill is unchanged there since
+`d330df96`), then edited. This repository is public and has private
+vulnerability reporting, so the source's flow applies: private tracking,
+ownership before severity, accept or close, a private fork, an ordinary public
+pull request when the fix is ready, publication after it has shipped.
+
+| This repo | Source (Inspector) | Git blob id | Edits |
+| --- | --- | --- | --- |
+| `.claude/skills/security-advisory/SKILL.md` | same path (378 lines) | `d70f393ca7baf6e49a992a199be830f78ad86eb9` | **One maintainer, and an agent that works for the owner.** Every outward act the source gives a maintainer is the owner's here and is listed as such: accept, close, each message to a reporter, the private fork, a report upstream, the merge, the publish, the CVE and the credits. The source's private draft card became a private `[SEC]` Linear ticket (the wording of that step, of the reporter reply and of the ownership table's shape follows a private sibling repository's version of this skill, its commit `d749997`). Added: nothing about an unpublished vulnerability goes to the review model or any outside service until its branch is public, since the reviewer here is another vendor's model and the source's outside reviewer also runs only on the public pull request; the four public acts an agent may do are not available before that step; branch names, commit subjects and PR titles are not written from the `[SEC]` title. Left out because they are not true here: the two release lines and their boards, milestones, the priority rubric, the helper script for the fork, the release step. The API facts are the source's, marked as not re-verified here except the listing read. |
+| `.claude/skills/security-advisory/evals/evals.json` | same path | `06743379e93d669051c34df7136fa5a5b0985212` | The source's cases, with "release" read as "on main", one case naming the MCP SDK, and one for a vulnerability found in a review. |
+| `.claude/skills/issue-create/SKILL.md`, the exception sentence | (already recorded above) | — | It said "stop and tell the owner", which would contradict a procedure that files the private ticket with this recipe. It now sends a vulnerability to `security-advisory`. |
+| `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the vulnerability exception | Inspector `AGENTS.md`, the advisory exception | — | The index row; the intro names the skill; the exception names the private ticket, what stays out of this repository and away from outside services until the fix is ready, and the owner-only acts. |
+
 ## Contribution policy, issue forms and security policy
 
 Copied from the Inspector at `eb54b44` (blob ids read with
