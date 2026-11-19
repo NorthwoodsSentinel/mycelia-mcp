@@ -182,7 +182,7 @@ else
   elif [ "$lrc" -ne 2 ]; then
     echo "NO PUSH: ls-remote exit=$lrc; a branch named $BR is already in this repository (0), or the read failed"
   else
-    git push origin "$HEAD_SHA:refs/heads/$BR"; prc=$?
+    git push --force-with-lease="refs/heads/$BR:" origin "$HEAD_SHA:refs/heads/$BR"; prc=$?
     SEEN=$(git ls-remote origin "refs/heads/$BR" | cut -f1)
     if [ "$prc" -eq 0 ] && [ "$SEEN" = "$HEAD_SHA" ]; then
       echo "public branch $BR is at $HEAD_SHA"
@@ -193,7 +193,7 @@ else
 fi
 ```
 
-   Go on only from the line `public branch … is at …`. `git ls-remote --exit-code` exits 2 when no branch of that name exists, which is the one result that allows the push. **This block is for the first publication only.** Once it has passed, the patch is public and the branch is an ordinary one: a fix pushed later in the review loop is `/pr-flow`'s push, under `/pr-flow`'s own checks, and it does not go to the fork.
+   Go on only from the line `public branch … is at …`. `git ls-remote --exit-code` exits 2 when no branch of that name exists, which is the one result that allows the push. The push carries that condition itself: `--force-with-lease` with an empty expected value makes the server refuse it if a branch of that name has appeared since the check, so the check and the push cannot disagree. **This block is for the first publication only.** Once it has passed, the patch is public and the branch is an ordinary one: a fix pushed later in the review loop is `/pr-flow`'s push, under `/pr-flow`'s own checks, and it does not go to the fork.
 2. **Open an ordinary PR** with `/pr-flow`, taking up its step 5 **after** its push command (the block above stood in for it): `gh pr create` with `--head nor-<N>-<slug>`, `Closes NOR-<N>` first, the `factory` label, the gate result on that commit. `/pr-flow` then moves the ticket to `In Review`. Say in the body that the fix was developed and reviewed in the advisory's private fork. **Keep the title and the description to the fix**: what the advisory will disclose is the advisory's to say. Leave out the reproduction, any proof of concept, and the reporter's details.
 3. **Run the Codex loop** (`/pr-flow`, step 6). The diff is public now, so this is the first point the review model may see it. Its subject carries the fix, not the report.
 4. **Hand it to the owner** (`/pr-flow`, step 7). The owner merges.
