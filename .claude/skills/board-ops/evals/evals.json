@@ -1,0 +1,34 @@
+[
+  {
+    "prompt": "Close NOR-412 as a duplicate of NOR-398.",
+    "expect": "board-ops"
+  },
+  {
+    "prompt": "Move NOR-405 to Done.",
+    "expect": "board-ops"
+  },
+  {
+    "prompt": "How do I add the chore label to NOR-377 without losing the labels it already has?",
+    "expect": "board-ops"
+  },
+  {
+    "prompt": "Move NOR-421 to In Progress.",
+    "expect": "board-ops"
+  },
+  {
+    "prompt": "Cancel NOR-390; we are not doing it.",
+    "expect": "board-ops"
+  },
+  {
+    "prompt": "Show me the comments on NOR-388.",
+    "expect": "board-ops"
+  },
+  {
+    "prompt": "What year did the Berlin Wall fall?",
+    "expect": null
+  },
+  {
+    "prompt": "Write a haiku about autumn leaves.",
+    "expect": null
+  }
+]
