@@ -1,0 +1,30 @@
+[
+  {
+    "prompt": "Create a ticket titled 'mycelia_feed ignores the limit argument' and set it up the way this repo wants.",
+    "expect": "issue-create"
+  },
+  {
+    "prompt": "File a Linear issue: npm run smoke is flaky on the legacy era.",
+    "expect": "issue-create"
+  },
+  {
+    "prompt": "Open a ticket for the id-validation bug I just found while working on something else.",
+    "expect": "issue-create"
+  },
+  {
+    "prompt": "Raise an issue that mycelia_get_request returns an empty error message on timeout.",
+    "expect": "issue-create"
+  },
+  {
+    "prompt": "Check whether anyone has filed a ticket about mycelia_browse_requests being slow, and file one if not.",
+    "expect": "issue-create"
+  },
+  {
+    "prompt": "What is the chemical symbol for potassium?",
+    "expect": null
+  },
+  {
+    "prompt": "Reverse this string: stressed",
+    "expect": null
+  }
+]
