@@ -1,6 +1,6 @@
 ---
 name: board-ops
-description: "Move, close or relabel a NOR ticket in Linear: change its state (with the Todo, In Progress and Done checks), close it as Duplicate or Canceled, add or remove a label without stripping the rest, read its comments, page a list to the end. Use when moving a ticket to Todo, In Progress, In Review or Done; when closing one as a duplicate or canceling it; when adding or removing a label; or when reading a ticket's comments or a full listing."
+description: "Move, close or relabel a NOR ticket in Linear: change its state (with the Todo, In Progress, In Review and Done checks), close it as Duplicate or Canceled, add or remove a label without stripping the rest, read its comments, page a list to the end. Use when moving a ticket to Todo, In Progress, In Review or Done; when closing one as a duplicate or canceling it; when adding or removing a label; or when reading a ticket's comments or a full listing."
 disable-model-invocation: false
 ---
 
@@ -45,14 +45,12 @@ Four target states have a precondition. Check it first; if it does not hold, **d
 
 ## Close as Duplicate
 
-Linear refuses the `Duplicate` state unless a duplicate relation exists. Setting the relation is what moves it (observed 2026-11-16):
+Linear refuses the `Duplicate` state unless a duplicate relation exists. Setting the relation is what moves it (observed 2026-11-16), so it is also what closes the issue. **First** put anything worth keeping from the later issue into the earlier one as a comment. Then:
 
 ```
 save_issue  id: "NOR-<later>"  duplicateOf: "NOR-<earlier>"
 get_issue   id: "NOR-<later>"  includeRelations: true   # confirm state Duplicate and the relation
 ```
-
-Before closing it, put anything worth keeping from the later issue into the earlier one as a comment.
 
 ## Close as Canceled
 
