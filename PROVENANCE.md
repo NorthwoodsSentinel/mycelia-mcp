@@ -91,6 +91,23 @@ pull request when the fix is ready, publication after it has shipped.
 | `.claude/skills/issue-create/SKILL.md`, the exception sentence | (already recorded above) | — | It said "stop and tell the owner", which would contradict a procedure that files the private ticket with this recipe. It now sends a vulnerability to `security-advisory`. |
 | `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the vulnerability exception | Inspector `AGENTS.md`, the advisory exception | — | The index row; the intro names the skill; the exception names the private ticket, what stays out of this repository and away from outside services until the fix is ready, and the owner-only acts. |
 
+## Knowledge skills
+
+Copied from the Inspector at `eb54b44`, then edited. Each file's blob id is the
+same at `d330df96`, the commit the rest of this record names (read from GitHub
+at that commit). The Inspector is several clients over a shared core, with a
+build per client; this repository is one package with two source files and no
+build, so each skill keeps the source's purpose and shape and almost none of
+its content.
+
+| This repo | Source (Inspector) | Git blob id | Edits |
+| --- | --- | --- | --- |
+| `.claude/skills/project-structure/SKILL.md` | same path (116 lines) | `1c34cfb172468c3675c1deeecb096e864c7915a7` | Kept: a map of what owns what, a "where a new file goes" table, model-invoked background knowledge with no slash entry (`user-invocable: false`), "read the file's header, not a second copy here". The map is this repository's: the two source files and which side a piece of code belongs on, the six places a new tool touches, the folders. Dropped: the clients, `core/`, the web backend and the web source layout. |
+| `.claude/skills/local-dev/SKILL.md` | same path (363 lines) | `4dbae97651a8923fddbee26f9ffadf0b824e0156` | Kept: install, run, do a real install in a git worktree, runtime consumption decides `dependencies`, the test runner and its coverage provider pinned exactly and bumped together, `overrides` over `npm audit fix`. Added: the versions CI states, the four environment variables and that a real key is the owner's, `client-smoke` as the way to run without one. Dropped, and listed in the skill as absent: the install cascade, the builds, the shared-code alias, bundler externals, the published-tarball check, and the reasoning that belongs to those. |
+| `.claude/skills/testing/SKILL.md` | same path (307 lines) | `519e64e2a4e4c83dfb35b7ccb59fcd6fdab178cf` | Kept: where a test goes, how to run it, the per-file coverage gate, keep the exact filename, a real server and client in tests where the tier calls for it. The source's "a runner silently skips a file its glob misses" became this repository's two explicit lists and what guards each (one is guarded by a test, one by nothing). Added: what each kind of run proves. Dropped: the per-client commands, the tiers, React and Storybook, and the test-server fixtures. |
+| `.claude/skills/*/evals/evals.json` for the three | same paths | `241aa26f02229ad125344bad9eec0e8b1ef1d184`, `62c70f250d61f3f755bdd5801d7a8dcda7927f46`, `2271ebfb4265d8cb933a995195fc0f70d30e2818` | The source's shape (positives, then negatives; the source's negatives kept). The positives are this repository's, written to the prompt shapes `docs/skill-authoring.md` reports as firing, and none asks what `AGENTS.md` already answers. A private sibling repository's adaptation of the same three skills was read for its shape and for which prompt shapes measured well there; no text from it that names its hosts or systems is carried over. **Trigger rates here are unmeasured**: `skills:eval` has not been run. |
+| `AGENTS.md`: three Skills index rows | Inspector `AGENTS.md`, Skills index | — | The rows. |
+
 ## Contribution policy, issue forms and security policy
 
 Copied from the Inspector at `eb54b44` (blob ids read with
