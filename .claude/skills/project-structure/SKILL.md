@@ -9,7 +9,7 @@ disable-model-invocation: false
 
 In this repo: adapted from the MCP Inspector's `project-structure` skill (`modelcontextprotocol/inspector` at commit d330df96). The record is in `PROVENANCE.md`, under "Knowledge skills". The Inspector is several clients over a shared `core/`. This repo is **one package with two source files**. The rules are in [`AGENTS.md`](../../../AGENTS.md); this skill is the map.
 
-Every file carries a header comment saying what it is for and why. **Read that header** rather than looking for a second copy of the reasoning here.
+Every TypeScript, JavaScript and workflow file here starts with a header comment saying what it is for and why. **Read that header** rather than looking for a second copy of the reasoning here. A JSON file cannot carry one: what a skill's `evals/evals.json` is for is in `AGENTS.md`, "Maintaining the skills", rule 3.
 
 ## The server: two files
 
