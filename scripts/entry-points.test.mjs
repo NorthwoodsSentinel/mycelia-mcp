@@ -99,6 +99,17 @@ const GUARDS = [
     ],
   },
   {
+    script: "verify-typecheck-coverage.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^verify:typecheck-coverage — OK: all \d+ tracked TypeScript file\(s\) get a tsc pass or are named in EXCLUDED \(\d+\)\.$/m,
+      },
+      { status: 1, line: /^verify:typecheck-coverage — \d+ failure\(s\):$/m },
+    ],
+  },
+  {
     script: "dco-check.mjs",
     args: ["--base", "HEAD"],
     terminal: [
