@@ -58,6 +58,17 @@ const GUARD_TIMEOUT_MS = 120_000;
  */
 const GUARDS = [
   {
+    script: "verify-install-fresh.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^verify:install-fresh — OK: \d+ package\(s\) required on this host, each installed at its locked version\.$/m,
+      },
+      { status: 1, line: /^verify:install-fresh — \d+ problem\(s\):$/m },
+    ],
+  },
+  {
     script: "verify-action-pins.mjs",
     args: [],
     terminal: [
@@ -74,6 +85,43 @@ const GUARDS = [
         status: 1,
         line: /^verify:skills — (\d+ problem\(s\):|no skills found;|.+ does not exist\.)/m,
       },
+    ],
+  },
+  {
+    script: "verify-format-coverage.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^verify:format-coverage — OK: all \d+ tracked source file\(s\) are format-gated\.$/m,
+      },
+      { status: 1, line: /^verify:format-coverage — \d+ problem\(s\):$/m },
+    ],
+  },
+  {
+    script: "verify-typecheck-coverage.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^verify:typecheck-coverage — OK: all \d+ tracked TypeScript file\(s\) get a tsc pass or are named in EXCLUDED \(\d+\)\.$/m,
+      },
+      { status: 1, line: /^verify:typecheck-coverage — \d+ failure\(s\):$/m },
+    ],
+  },
+  {
+    // Run WITHOUT `--prepare`, which would delete this checkout's coverage
+    // summary. With no argument the guard only reads: it passes on a current
+    // summary and fails on a missing or stale one, and either is a verdict.
+    // Its first line is a banner, so neither verdict line is that one.
+    script: "verify-coverage-scope.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^✓ the coverage report holds its declared file set; every tracked TypeScript file is declared or named$/m,
+      },
+      { status: 1, line: /^✗ \d+ coverage-scope failure\(s\):$/m },
     ],
   },
   {

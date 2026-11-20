@@ -16,9 +16,9 @@ bun install --frozen-lockfile
 
 It needs only this repo and the npm registry. `--frozen-lockfile` fails rather than rewriting `bun.lock`. **Read the error before acting on it.** A lockfile error (the lockfile would change) means `bun.lock` and `package.json` disagree: fix that in a change of its own. A registry, network, integrity, permission or Bun-version error is something else, and changing the lockfile is not the fix.
 
-**Which Bun, which Node.** `package.json` declares neither. CI states its versions once, in `.github/workflows/main.yml`: Bun `CI_BUN_VERSION` (1.3.14 when this was written) and Node 22. Use that Bun when a local result has to match CI's. Node is needed as well as Bun: the guards under `scripts/` and their tests run with `node`, and the smoke and the skill validator run through `npx`.
+**Which Bun, which Node.** `package.json` declares neither. CI states its versions once, in `.github/workflows/main.yml`: Bun `CI_BUN_VERSION` (1.3.14 when this was written) and Node 22. Use that Bun when a local result has to match CI's. A change to `bun.lock` must be made with that Bun (see "Dependencies"). Node is needed as well as Bun: the guards under `scripts/` and their tests run with `node`, and the smoke and the skill validator run through `npx`.
 
-⚠️ **A new git worktree has no `node_modules`.** Run the install in each worktree before the first `npm run` there; without it the first gate stage fails on a missing package, which reads like a broken branch and is not one.
+⚠️ **A new git worktree has no `node_modules`.** Run the install in each worktree before the first `npm run` there; without it the first gate stage, `verify:install-fresh`, fails naming the missing packages and `bun install --frozen-lockfile`.
 
 ## Run the server
 
@@ -48,7 +48,7 @@ The server reads its whole configuration from the environment when it starts, an
 - **Pins that move together.** `vitest` and `@vitest/coverage-v8` are pinned to the same exact version; bump both in one change, or the tests run on one version while the coverage provider was built against another. `prettier` is pinned exactly so the format check gives one verdict everywhere.
 - **Pin a transitive dependency with an `overrides` entry, never `npm audit fix`** (`AGENTS.md`). `audit fix` resolves an advisory that has no upward escape by silently downgrading; an `overrides` entry moves the one package and nothing else. Drop the entry once no consumer's range admits the vulnerable versions.
 - **A bump is issue-driven** (`AGENTS.md`): a ticket, then the change through `/pr-flow`. After a bump run the full `npm run local:gate`, not `validate` alone: the smoke drives the real server through the SDK and catches a break the unit tests, which spy on the client, do not.
-- **The lockfile is `bun.lock`**, committed. Change it only by changing `package.json` and running `bun install`, and commit both together.
+- **The lockfile is `bun.lock`**, committed. Change it only by changing `package.json` and running `bun install` **with the Bun version CI pins** (`CI_BUN_VERSION` in `.github/workflows/main.yml`), and commit both together. A newer Bun can write a lockfile the pinned one refuses in a frozen install, so CI can then fail at its install step. `bun install --frozen-lockfile` never rewrites the lockfile and is safe on any Bun version. The measurement is in `docs/quality-gate.md`, "Installs and the lockfile".
 
 ## What is not here
 
