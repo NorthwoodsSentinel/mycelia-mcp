@@ -58,6 +58,17 @@ const GUARD_TIMEOUT_MS = 120_000;
  */
 const GUARDS = [
   {
+    script: "verify-install-fresh.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^verify:install-fresh — OK: \d+ package\(s\) required on this host, each installed at its locked version\.$/m,
+      },
+      { status: 1, line: /^verify:install-fresh — \d+ problem\(s\):$/m },
+    ],
+  },
+  {
     script: "verify-action-pins.mjs",
     args: [],
     terminal: [

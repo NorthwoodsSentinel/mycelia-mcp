@@ -117,10 +117,16 @@ read at `f2fa210`, where they are unchanged), then edited before its first
 commit here. The design, its two review rounds and the limitations accepted
 from them are in `docs/DESIGN-nor-615-gates.md`.
 
+Not ported, with the reason in that design: the Inspector's `verify-install-scripts` (on the pinned Bun an empty trust list is read as unset, and the empty list is the only true one here), `gate-lease`, `verify-build-gate`, `verify-bundle-externals` and `verify-dep-lockstep`.
+
 | This repo | Inspector file and blob at `eb54b44` | Blob in the sibling at `f2fa210` | Edits |
 | --- | --- | --- | --- |
 | `scripts/lib/workflow-gate.mjs` | same path, `570a1fbdde0afd74b3c50b787393946372e360d0` | `5d0b821b687816bdacf2050bf9850d55cc01a2c7` | The header, rewritten for this repository. One message loses a ticket reference. No logic edit. The Inspector's rules 2 to 4 (browser engines) were already dropped by the port, which also added: a repository-local `uses:` is a finding. |
 | `scripts/lib/workflow-gate.test.mjs` | same path, `dbc04bd814d61c667a169d518d1f0541c802df75` | `38e3b771dfc26d6f78e45ea1c27ba379d8c7556c` | The header. One fixture line drops a script this repository does not have. Every case is kept. Joined to `test:scripts`. |
+| `scripts/verify-install-fresh.mjs` | same path, `46e03e55db49ef2e516f20249b21e3be607ff3cb` (it reads npm's `package-lock.json`) | `cb1dabb3cc93d644585392afb7bbb4c0b4e92a3a` | The header, rewritten: the Inspector's own reason for the guard, and the limits accepted in the design. One inline comment loses a ticket reference. No logic edit. The port had already changed the lockfile it reads to `bun.lock` and added the walk that decides what this host requires. First in `validate`; a row in `scripts/entry-points.test.mjs`. |
+| `scripts/verify-install-fresh.test.mjs` | none (the Inspector's test is for npm's lockfile) | `d9c847faee39e74ba14db658556e2024a2921da4` | The header. Every case is kept. Joined to `test:scripts`. |
+| `scripts/lib/bun-lock.mjs` | none: not an Inspector file | `e17da63eae93093e7a87d0858ff9185881dd0bc1` | The header only. The reader for Bun's text lockfile, `lockfileVersion` 1. |
+| `scripts/lib/bun-lock.test.mjs` | none | `320d4d0af442b1f7394f3533d7efb036b93cb360` | The header only. Joined to `test:scripts`. |
 
 ## Contribution policy, issue forms and security policy
 
