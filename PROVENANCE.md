@@ -127,6 +127,8 @@ Not ported, with the reason in that design: the Inspector's `verify-install-scri
 | `scripts/verify-install-fresh.test.mjs` | none (the Inspector's test is for npm's lockfile) | `d9c847faee39e74ba14db658556e2024a2921da4` | The header. Every case is kept. Joined to `test:scripts`. |
 | `scripts/lib/bun-lock.mjs` | none: not an Inspector file | `e17da63eae93093e7a87d0858ff9185881dd0bc1` | The header only. The reader for Bun's text lockfile, `lockfileVersion` 1. |
 | `scripts/lib/bun-lock.test.mjs` | none | `320d4d0af442b1f7394f3533d7efb036b93cb360` | The header only. Joined to `test:scripts`. |
+| `scripts/verify-format-coverage.mjs` | same path, `f617cac5eb763a76ba958dbcb46790aa8df857a9` | `b387afdffb18c47772ab66b14cafa115fc59160d` | The header. **The one logic edit of this port:** the port's map of tracked folders Prettier may ignore is removed with its two uses, so both failures are unconditional here; one message and the OK line are reworded to match. The port had already made it one manifest, taken globs only from a `prettier --check` that `validate` reaches, and asked Prettier itself which files it ignores. After `format:check` in `validate`; a row in `scripts/entry-points.test.mjs`. |
+| `scripts/verify-format-coverage.test.mjs` | none kept | `01c49e162b797dc1c4abbb42f3a1dfe80c7d5055` | The header. The allowed-exclusion case is removed; the fixture folder is `scripts/`. Eighteen tests, as in the port. Joined to `test:scripts`. |
 
 ## Contribution policy, issue forms and security policy
 

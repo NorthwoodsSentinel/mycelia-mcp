@@ -88,6 +88,17 @@ const GUARDS = [
     ],
   },
   {
+    script: "verify-format-coverage.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^verify:format-coverage — OK: all \d+ tracked source file\(s\) are format-gated\.$/m,
+      },
+      { status: 1, line: /^verify:format-coverage — \d+ problem\(s\):$/m },
+    ],
+  },
+  {
     script: "dco-check.mjs",
     args: ["--base", "HEAD"],
     terminal: [
