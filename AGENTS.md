@@ -33,6 +33,7 @@ A change that adds a skill under `.claude/skills/<name>/SKILL.md` adds its row t
 ## Dependency placement
 
 - **Pin a transitive dependency with an `overrides` entry**, not with `npm audit fix` — which "resolves" an advisory with no upward escape by silently downgrading.
+- **Rewrite `bun.lock` only with the Bun version CI pins** (`CI_BUN_VERSION` in `.github/workflows/main.yml`). A newer Bun can write a lockfile the pinned one refuses in a frozen install, so CI can fail at its install step; `bun install --frozen-lockfile` never rewrites the lock and is safe on any version. The measurement is in [`docs/quality-gate.md`](./docs/quality-gate.md).
 
 ### Dependency updates are issue-driven, like everything else
 
@@ -153,7 +154,7 @@ This is not a licence to relax the bar: **a test that races is fixed with fake t
 
 ## Mandatory pre-push gate
 
-The command names below are the source's. In this repo `validate` runs the pin guard (`verify:action-pins`), the skills guard (`verify:skills`), the format check, lint, the typecheck, and `test` (the guards' own tests under `node --test`, then the Vitest tests with per-file coverage); `local:gate` is `validate`, then the local-only sign-off stage `local:dco`, then `verify:skills:cli` (the authoritative skill validator), then `smoke` (the pinned Inspector over stdio against a fake Mycelia API on 127.0.0.1, judged by exit code). CI runs every stage of `npm run local:gate` except `local:dco`, which is local-only; the pull request's commits are checked by the `DCO` workflow.
+The command names below are the source's. In this repo `validate` runs, in order, the install guard (`verify:install-fresh`), the pin guard (`verify:action-pins`), the skills guard (`verify:skills`), the format check and the guard on what it covers (`verify:format-coverage`), lint, the typecheck and the guard on what it covers, and `test` (the guards' own tests under `node --test`, then the Vitest tests with per-file coverage, with the coverage-scope guard before and after them); `local:gate` is `validate`, then the local-only sign-off stage `local:dco`, then `verify:skills:cli` (the authoritative skill validator), then `smoke` (the pinned Inspector over stdio against a fake Mycelia API on 127.0.0.1, judged by exit code). CI runs every stage of `npm run local:gate` except `local:dco`, which is local-only; the pull request's commits are checked by the `DCO` workflow. What each script checks, and what a failure of it means, is [`docs/quality-gate.md`](./docs/quality-gate.md).
 
 - **ALWAYS run `npm run format` before committing.** `validate` runs the non-fixing `format:check` and will fail in CI on any unformatted file, so run the auto-fixer first rather than letting `format:check` catch it.
 - **`npm run local:gate` is the mandatory pre-push command.** It runs **every check** CI runs, plus one local-only step, so a green run here is the strongest predictor of a green CI this repo has.

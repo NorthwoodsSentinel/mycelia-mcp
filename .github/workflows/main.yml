@@ -7,9 +7,11 @@
 # differs, the reason is beside the line. Record: PROVENANCE.md.
 #
 # One job runs every stage of `npm run local:gate`, the command a developer
-# runs before pushing, except `local:dco`: `validate` (pin guard, skills
-# guard, format check, lint, typecheck, the script tests and the Vitest tests
-# with per-file coverage), then `verify:skills:cli` (the authoritative
+# runs before pushing, except `local:dco`: `validate` (install guard, pin
+# guard, skills guard, format check, lint, typecheck, the script tests and the
+# Vitest tests with per-file coverage, and the guards on what the format
+# check, the typecheck and the coverage report cover; what each stage checks
+# is docs/quality-gate.md), then `verify:skills:cli` (the authoritative
 # `claude plugin validate` at the pinned CLI, the Inspector's own stage), then
 # `smoke` (the pinned MCP Inspector over stdio, against a fake Mycelia API on
 # 127.0.0.1). `local:dco` reads `origin/main`,

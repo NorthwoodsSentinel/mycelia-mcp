@@ -41,9 +41,9 @@ A change to **what an existing tool does** is usually row 1 and row 3. A change 
 
 | Path | Holds |
 | --- | --- |
-| `scripts/` | The gate's guards, run with `node`: `verify-action-pins`, `verify-skills`, `verify-skills-cli`, `dco-check`, `smoke-inspector`, each with a `*.test.mjs`. Also `skill-eval`, the **manual** eval runner (`npm run skills:eval`), never part of the gate or CI, with its stubbed test. `entry-points.test.mjs` checks that every guard reports a verdict when the checkout is reached through a symlink |
-| `scripts/lib/` | Helpers the guards share (the skill manifest, npm-script parsing, the Claude CLI runner, main-module detection, Windows shell arguments), each with its test |
-| `docs/` | Guides (`skill-authoring.md`) |
+| `scripts/` | The gate's guards, run with `node`: `verify-install-fresh`, `verify-action-pins`, `verify-skills`, `verify-skills-cli`, `verify-format-coverage`, `verify-typecheck-coverage`, `verify-coverage-scope`, `dco-check`, `smoke-inspector`, each with a `*.test.mjs`; and two suites of attack cases, `inventory-attack.test.mjs` and `coverage-attack.test.mjs`. What each checks is `docs/quality-gate.md`. Also `skill-eval`, the **manual** eval runner (`npm run skills:eval`), never part of the gate or CI, with its stubbed test. `entry-points.test.mjs` checks that every guard reports a verdict when the checkout is reached through a symlink |
+| `scripts/lib/` | Helpers the guards share (the skill manifest, npm-script parsing, the Claude CLI runner, main-module detection, Windows shell arguments, the workflow scan, the `bun.lock` reader, the tracked-TypeScript inventory), each with its test |
+| `docs/` | Guides (`skill-authoring.md`, `quality-gate.md`) and the design note for the gate guards |
 | `.claude/skills/` | The procedures (the index is in `AGENTS.md`) |
 | `.github/workflows/` | `main.yml` (the gate in CI) and `dco.yml` (sign-off on a pull request's commits) |
 | `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | The public issue forms and the PR template |
@@ -60,7 +60,7 @@ There is no `test/` folder, no build output that is committed, and no second pac
 | --- | --- |
 | A new tool, or a change to one | the two source files (above) |
 | A call to a Mycelia endpoint this server does not use yet | a method in `src/mycelia-client.ts`; nothing else builds a URL |
-| A new source module | `src/`. Coverage measures `src/**/*.ts`; a module anywhere else falls out of the gate (`AGENTS.md`) |
+| A new source module | `src/`. Coverage measures `src/**/*.ts`; a TypeScript module anywhere else fails `npm run test`, which names it (`AGENTS.md`) |
 | A test of source code | beside it, `src/<name>.test.ts`, **and** in the `include` list (`/testing`) |
 | A gate guard or a build helper run with Node | `scripts/<name>.mjs` + `scripts/<name>.test.mjs`, **and** in `test:scripts` (`/testing`) |
 | Logic two guards share | `scripts/lib/` |
