@@ -11,7 +11,7 @@
     "start": "bun src/index.ts",
     "verify:action-pins": "node scripts/verify-action-pins.mjs",
     "verify:skills": "node scripts/verify-skills.mjs",
-    "test:scripts": "node --test scripts/verify-action-pins.test.mjs && node --test scripts/dco-check.test.mjs && node --test scripts/lib/main-module.test.mjs && node --test scripts/smoke-inspector.test.mjs && node --test scripts/lib/skill-manifest.test.mjs && node --test scripts/lib/npm-scripts.test.mjs && node --test scripts/verify-skills.main.test.mjs && node --test scripts/entry-points.test.mjs && node --test scripts/verify-skills-cli.test.mjs && node --test scripts/skill-eval.test.mjs && node --test scripts/lib/claude-cli.test.mjs && node --test scripts/lib/win-shell-args.test.mjs",
+    "test:scripts": "node --test scripts/verify-action-pins.test.mjs && node --test scripts/dco-check.test.mjs && node --test scripts/lib/main-module.test.mjs && node --test scripts/smoke-inspector.test.mjs && node --test scripts/lib/skill-manifest.test.mjs && node --test scripts/lib/npm-scripts.test.mjs && node --test scripts/verify-skills.main.test.mjs && node --test scripts/entry-points.test.mjs && node --test scripts/verify-skills-cli.test.mjs && node --test scripts/skill-eval.test.mjs && node --test scripts/lib/claude-cli.test.mjs && node --test scripts/lib/win-shell-args.test.mjs && node --test scripts/lib/workflow-gate.test.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}\"",
     "lint": "eslint . --max-warnings 0",

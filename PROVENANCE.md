@@ -108,6 +108,20 @@ its content.
 | `.claude/skills/*/evals/evals.json` for the three | same paths | `241aa26f02229ad125344bad9eec0e8b1ef1d184`, `62c70f250d61f3f755bdd5801d7a8dcda7927f46`, `2271ebfb4265d8cb933a995195fc0f70d30e2818` | The source's shape (positives, then negatives; the source's negatives kept). The positives are this repository's, written to the prompt shapes `docs/skill-authoring.md` reports as firing, and none asks what `AGENTS.md` already answers. A private sibling repository's adaptation of the same three skills was read for its shape and for which prompt shapes measured well there; no text from it that names its hosts or systems is carried over. **Trigger rates here are unmeasured**: `skills:eval` has not been run. |
 | `AGENTS.md`: three Skills index rows | Inspector `AGENTS.md`, Skills index | — | The rows. |
 
+## Gate guards
+
+The MCP Inspector's CI and pre-push gate guards (its `main` at `eb54b44`). Each
+file here was copied from a reviewed port of the same guard in a private
+sibling repository (that port merged at its commit `0f02d42`; the files were
+read at `f2fa210`, where they are unchanged), then edited before its first
+commit here. The design, its two review rounds and the limitations accepted
+from them are in `docs/DESIGN-nor-615-gates.md`.
+
+| This repo | Inspector file and blob at `eb54b44` | Blob in the sibling at `f2fa210` | Edits |
+| --- | --- | --- | --- |
+| `scripts/lib/workflow-gate.mjs` | same path, `570a1fbdde0afd74b3c50b787393946372e360d0` | `5d0b821b687816bdacf2050bf9850d55cc01a2c7` | The header, rewritten for this repository. One message loses a ticket reference. No logic edit. The Inspector's rules 2 to 4 (browser engines) were already dropped by the port, which also added: a repository-local `uses:` is a finding. |
+| `scripts/lib/workflow-gate.test.mjs` | same path, `dbc04bd814d61c667a169d518d1f0541c802df75` | `38e3b771dfc26d6f78e45ea1c27ba379d8c7556c` | The header. One fixture line drops a script this repository does not have. Every case is kept. Joined to `test:scripts`. |
+
 ## Contribution policy, issue forms and security policy
 
 Copied from the Inspector at `eb54b44` (blob ids read with
