@@ -10,7 +10,7 @@ In this repo: adapted from the MCP Inspector's `issue-create` skill (`modelconte
 
 An issue **you** create is not "created" until every step below is done. A Linear issue is its own card: there is no separate board step, but the labels, the state and the parent are separate fields, and each one has to be set and then **read back**.
 
-**The single exception is a privately reported vulnerability.** It is tracked privately until the reviewed fix is ready, because a real issue would disclose it before a fix exists (`AGENTS.md`, Issue-driven Work Style). **Never file one through this flow**, under any label or title: stop and tell the owner. Accepting and publishing an advisory are the owner's. Nothing you reach through *this* flow is that case.
+**The single exception is a vulnerability.** Never file one as an ordinary issue through this flow, under any label or title: a vulnerability starts from `/security-advisory`. That procedure files the private `[SEC]` ticket as its own first step, using this recipe's mechanics, and it governs what the ticket may say and where its words may go (`AGENTS.md`, Issue-driven Work Style). If you reached this skill with a vulnerability in hand, stop here and open that one.
 
 | # | Step | Required |
 |---|---|---|
