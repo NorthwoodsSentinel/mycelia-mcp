@@ -1,8 +1,9 @@
 // The tracked-TypeScript inventory: the set of files a guard here requires an
 // answer for. `scripts/verify-typecheck-coverage.mjs` compares it with the
-// TypeScript program today. It exists because "every tracked TypeScript file
-// is typechecked, or named" needs one list of tracked files that no glob in a
-// config can narrow.
+// TypeScript program, and `scripts/verify-coverage-scope.mjs` with the
+// expanded coverage declaration. It exists because "every tracked TypeScript
+// file is typechecked and coverage-measured, or named" needs one list of
+// tracked files that no glob in a config can narrow.
 //
 // In this repo: the behaviour is the MCP Inspector's
 // scripts/verify-typecheck-coverage.mjs (modelcontextprotocol/inspector, blob

@@ -57,10 +57,10 @@ These one-file runs do not measure coverage. Coverage comes from the full `npm r
 
 ## The coverage gate
 
-`npm run test` ends with Vitest's V8 coverage over `src/**/*.ts`, **90 per file on lines, statements, functions and branches**, test files excluded.
+`npm run test` runs Vitest's V8 coverage over `src/**/*.ts`, **90 per file on lines, statements, functions and branches**, test files excluded, and then the scope guard, which checks that the report holds what the configuration declares.
 
 - **A source file no test loads is measured at 0 and fails.** A new module in `src/` needs tests in the same change.
-- **A module outside `src/` is not measured at all** (`AGENTS.md`). Keep source in `src/`.
+- **A module outside `src/` is not measured, and `npm run test` fails naming it.** After the Vitest run, `scripts/verify-coverage-scope.mjs` requires every tracked TypeScript file to be in the coverage declaration, or named with a reason in the guard's `EXCLUDED` or `EXCLUDED_PATTERNS`. It also fails naming any declared file missing from the report (`AGENTS.md`). Keep source in `src/`.
 - **The guards under `scripts/` are not in the coverage gate.** They are tested by their own `node --test` suites, and not measured.
 - A genuinely unreachable branch gets a justified ignore annotation at the source (`AGENTS.md`), never a lowered bar.
 

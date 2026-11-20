@@ -110,6 +110,21 @@ const GUARDS = [
     ],
   },
   {
+    // Run WITHOUT `--prepare`, which would delete this checkout's coverage
+    // summary. With no argument the guard only reads: it passes on a current
+    // summary and fails on a missing or stale one, and either is a verdict.
+    // Its first line is a banner, so neither verdict line is that one.
+    script: "verify-coverage-scope.mjs",
+    args: [],
+    terminal: [
+      {
+        status: 0,
+        line: /^✓ the coverage report holds its declared file set; every tracked TypeScript file is declared or named$/m,
+      },
+      { status: 1, line: /^✗ \d+ coverage-scope failure\(s\):$/m },
+    ],
+  },
+  {
     script: "dco-check.mjs",
     args: ["--base", "HEAD"],
     terminal: [

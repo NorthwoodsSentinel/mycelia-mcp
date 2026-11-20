@@ -1,6 +1,8 @@
 // Attack cases 11 to 20 for the tracked-TypeScript inventory
 // (scripts/lib/ts-inventory.mjs) and the typecheck-coverage guard
-// (scripts/verify-typecheck-coverage.mjs).
+// (scripts/verify-typecheck-coverage.mjs). Case 14 also runs the inventory's
+// two failures through the coverage-scope guard
+// (scripts/verify-coverage-scope.mjs).
 //
 // In this repo: the cases were written by the review model (Codex) for a
 // reviewed port of the MCP Inspector's guard in a private sibling repository,
@@ -8,12 +10,10 @@
 // test is called "Codex case N". They are translated here from that port's
 // test runner to `node --test`: the assertions are `node:assert/strict`, the
 // type annotations are gone, and the imports point at this repo's modules.
-// The inputs and what each case asserts are the port's, with three
+// The inputs and what each case asserts are the port's, with two
 // differences, each marked "Local edit:" where it is made:
 //
 //   - Case 12 names this repo's build-output directories.
-//   - Case 14 holds the typecheck half only. The port's case ran the same two
-//     failures through its coverage-scope guard as well.
 //   - Case 19's fixture paths and reasons are neutral text.
 //
 // Record: PROVENANCE.md.
@@ -41,6 +41,7 @@ import path from "node:path";
 import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { trackedTypeScript } from "./lib/ts-inventory.mjs";
+import { run as runCoverageScope } from "./verify-coverage-scope.mjs";
 import { run as runTypecheck, tscEntry } from "./verify-typecheck-coverage.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -127,7 +128,7 @@ describe("Codex attack cases 11-20: inventory and typecheck coverage", () => {
     assert.deepEqual(trackedTypeScript(root), [...names].sort());
   });
 
-  test("Codex case 14: Git failure and empty inventory fail closed", () => {
+  test("Codex case 14: Git failure and empty inventory fail closed", async () => {
     const shimDir = mkdtempSync(path.join(tmpdir(), "git-shim-"));
     made.push(shimDir);
     const shim = path.join(shimDir, "git");
@@ -142,16 +143,48 @@ describe("Codex attack cases 11-20: inventory and typecheck coverage", () => {
       /inventory failed: git ls-files exited 73/,
     );
 
-    // Local edit: the port's case also ran this failing inventory, and the
-    // empty one below, through its coverage-scope guard and asserted the same
-    // two messages. That half is not here: this repo has no coverage-scope
-    // guard to run them through.
+    mkdirSync(path.join(root, "coverage"));
+    writeFileSync(
+      path.join(root, "coverage/coverage-summary.json"),
+      JSON.stringify({ total: {}, [path.join(root, "src/a.ts")]: {} }),
+    );
+    const resolveOptions = async () => ({
+      include: ["src/**/*.ts"],
+      exclude: [],
+    });
+    const coverage = await runCoverageScope({
+      root,
+      resolveOptions,
+      inventory: failingInventory,
+      excluded: {},
+      patterns: {},
+      log: () => {},
+    });
+    assert.match(
+      coverage.join("\n"),
+      /inventory failed: git ls-files exited 73/,
+    );
 
     const empty = repo(["README.md"]);
     assert.match(
       runTypecheck({ root: empty }).failures.join("\n"),
       /inventory is empty/,
     );
+    mkdirSync(path.join(empty, "src"), { recursive: true });
+    writeFileSync(path.join(empty, "src/a.ts"), "");
+    mkdirSync(path.join(empty, "coverage"));
+    writeFileSync(
+      path.join(empty, "coverage/coverage-summary.json"),
+      JSON.stringify({ total: {}, [path.join(empty, "src/a.ts")]: {} }),
+    );
+    const emptyCoverage = await runCoverageScope({
+      root: empty,
+      resolveOptions,
+      excluded: {},
+      patterns: {},
+      log: () => {},
+    });
+    assert.match(emptyCoverage.join("\n"), /inventory is empty/);
   });
 
   test("Codex case 15: New file outside the historic directories is rejected by typecheck coverage", () => {
