@@ -1,0 +1,30 @@
+[
+  {
+    "prompt": "I added a unit test beside a module in the source folder, with the right file name, and the test command still says no test files found when I point it at that file. What is the fix?",
+    "expect": "testing"
+  },
+  {
+    "prompt": "Where should the test for a new helper function go here, and how do I run only that test?",
+    "expect": "testing"
+  },
+  {
+    "prompt": "I wrote a test for one of the gate scripts. How do I make sure the gate actually runs it?",
+    "expect": "testing"
+  },
+  {
+    "prompt": "How do I run a single test by its name instead of the whole file?",
+    "expect": "testing"
+  },
+  {
+    "prompt": "I need a test that checks what request a tool call sends to the Mycelia API, without any network. How do I set that up here?",
+    "expect": "testing"
+  },
+  {
+    "prompt": "What does this regex do? /^\\d{3}-\\d{4}$/",
+    "expect": null
+  },
+  {
+    "prompt": "Rename the variable `foo` to `bar` in this snippet.",
+    "expect": null
+  }
+]

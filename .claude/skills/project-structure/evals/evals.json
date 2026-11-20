@@ -1,0 +1,30 @@
+[
+  {
+    "prompt": "I want to add a new tool to this server. Which parts of the codebase would I touch?",
+    "expect": "project-structure"
+  },
+  {
+    "prompt": "Does a check on a value before it reaches the network belong in the tool file or in the HTTP client file?",
+    "expect": "project-structure"
+  },
+  {
+    "prompt": "I'm changing one tool's input schema. Does that go in the same file as the code that calls the API?",
+    "expect": "project-structure"
+  },
+  {
+    "prompt": "I'm writing a new check for the pre-push gate. Where in the repo does it belong?",
+    "expect": "project-structure"
+  },
+  {
+    "prompt": "I'm adding a call to a Mycelia API endpoint this server does not use yet. Where does the code that builds the request go?",
+    "expect": "project-structure"
+  },
+  {
+    "prompt": "Convert this array of strings to uppercase.",
+    "expect": null
+  },
+  {
+    "prompt": "What is the capital of France?",
+    "expect": null
+  }
+]
