@@ -22,6 +22,7 @@ Where each rule below came from is in [`PROVENANCE.md`](./PROVENANCE.md). The ru
 | [`project-structure`](.claude/skills/project-structure/SKILL.md) | Where code belongs: the two source files and which side a piece of code goes on, everything a new tool touches before the gate passes, what each folder holds, where a new file goes | Model-invoked (background knowledge; no `/` entry) |
 | [`local-dev`](.claude/skills/local-dev/SKILL.md) | Installing and running the server locally: a fresh clone or a new worktree, the Bun and Node versions CI uses, the environment the server needs, no build step, pointing a host at a working copy; and declaring, pinning and bumping a dependency | Model-invoked, or `/local-dev` |
 | [`testing`](.claude/skills/testing/SKILL.md) | Where a test goes and which runner picks it up: the two explicit lists and what guards each, testing a tool or an API call without the network, running one file or one test, the coverage gate, which run exercises a change | Model-invoked, or `/testing` |
+| [`pre-push-gate`](.claude/skills/pre-push-gate/SKILL.md) | Running the pre-push gate and reading its result: the run command that keeps the gate's exit status, waiting on it in the background, finding the stage that failed, and the first thing to do for each stage's own failure line | Model-invoked, or `/pre-push-gate` |
 
 A change that adds a skill under `.claude/skills/<name>/SKILL.md` adds its row to this table in the same change, and the table never lists a skill that does not exist.
 

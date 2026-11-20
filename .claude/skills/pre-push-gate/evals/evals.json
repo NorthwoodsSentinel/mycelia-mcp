@@ -1,0 +1,30 @@
+[
+  {
+    "prompt": "I ran the pre-push gate as a background task and the task reported exit code 0. How do I check that the gate itself really passed?",
+    "expect": "pre-push-gate"
+  },
+  {
+    "prompt": "The pre-push gate stopped somewhere in a long log. How do I work out which stage failed?",
+    "expect": "pre-push-gate"
+  },
+  {
+    "prompt": "The gate failed at the typecheck stage, but the compiler printed no errors at all. How do I diagnose it?",
+    "expect": "pre-push-gate"
+  },
+  {
+    "prompt": "The gate's script-tests stage failed on a test about the workflow files, and I did not touch any guard. How do I diagnose it?",
+    "expect": "pre-push-gate"
+  },
+  {
+    "prompt": "The gate failed in its script tests saying one of the guards exited without a verdict. How do I work out what is wrong?",
+    "expect": "pre-push-gate"
+  },
+  {
+    "prompt": "What is 17 multiplied by 23?",
+    "expect": null
+  },
+  {
+    "prompt": "Write a limerick about a cat.",
+    "expect": null
+  }
+]
