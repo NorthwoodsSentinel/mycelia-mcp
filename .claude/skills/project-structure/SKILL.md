@@ -33,7 +33,7 @@ Every file carries a header comment saying what it is for and why. **Read that h
 | 5 | `scripts/smoke-inspector.mjs` | A `call(...)` entry in `CASES`, and a route in `fakeReply` when the method calls a path the fake does not serve yet. The smoke compares the server's `tools/list` with the case table **both ways**, so a listed tool with no case fails it |
 | 6 | The tool count and the tool table | `README.md` (the table under "What this is", and "the eight tools"), the first paragraph of `AGENTS.md`, and the header comment of `src/index.ts` |
 
-Rows 1 to 4 are what `npm run validate` checks (tests, and per-file coverage on both source files). Row 5 is what `npm run smoke` checks. Row 6 is checked by nothing: it is on this list because it is the one that gets forgotten.
+**What the gate does and does not check about this list.** `npm run validate` typechecks rows 1 and 2, runs whatever tests rows 3 and 4 hold, and holds each source file to 90 coverage. It does **not** check that a new tool has a test: a small addition can leave both files above the bar with rows 3 and 4 never written, and the run stays green. Those two rows are yours to write and a reviewer's to look for. `npm run smoke` does check row 5, in one direction that matters: a listed tool with no case fails it. Row 6 is checked by nothing; it is on this list because it is the one that gets forgotten.
 
 A change to **what an existing tool does** is usually row 1 and row 3. A change to **its schema or description** is row 2, and row 5 too when a required argument changes, because the smoke's case passes arguments.
 
