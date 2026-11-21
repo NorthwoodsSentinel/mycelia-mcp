@@ -14,6 +14,9 @@
 // reported at 0 and fails. Every exclusion below is a named line with its
 // reason.
 //
+// `test.env` switches the server's key file off for every test; the reason is
+// beside it.
+//
 // `testTimeout` is stated once, here. `retry` stays unset: a retry would turn
 // a real red into a quiet green.
 
@@ -23,7 +26,18 @@ export default defineConfig({
   test: {
     globals: false,
     environment: "node",
-    include: ["src/mycelia-client.test.ts", "src/index.test.ts"],
+    include: [
+      "src/mycelia-client.test.ts",
+      "src/fleet-key.test.ts",
+      "src/index.test.ts",
+    ],
+    // The key file is switched off for every test. Without this, any test that
+    // builds a client from the environment would open the key file in the home
+    // folder of the machine it runs on: a file of real credentials on a
+    // developer's machine, and a start-up refusal for a test agent it does not
+    // name. A test of the reader names its own file in a temporary folder
+    // (`src/fleet-key.test.ts`, which also asserts this default is in force).
+    env: { MYCELIA_ENV_FILE: "none" },
     testTimeout: 10_000,
     hookTimeout: 10_000,
     coverage: {

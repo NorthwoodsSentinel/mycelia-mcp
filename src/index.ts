@@ -11,6 +11,12 @@
  *   MYCELIA_PERSONAL_AGENT_ID_<NAME>  — the agent's Mycelia UUID
  *   MYCELIA_PERSONAL_KEY_<NAME>       — the agent's bearer token
  *   MYCELIA_PERSONAL_API_BASE         — base URL (https://mycelia-api.....)
+ *   MYCELIA_ENV_FILE                  — optional: a key file (default
+ *                                       ~/.config/fleet/mycelia.env), or `none`.
+ *                                       If the file exists, this agent's key is
+ *                                       read from it and wins over the inherited
+ *                                       one; if it exists and is unusable, the
+ *                                       server refuses to start. See README.md.
  *
  * The host (Claude Code, Maestro) registers this server as a child process
  * over stdio. See README.md for registration recipe.

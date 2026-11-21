@@ -36,6 +36,7 @@ The server reads its whole configuration from the environment when it starts, an
 | `MYCELIA_PERSONAL_AGENT_ID_<NAME>` | That agent's id |
 | `MYCELIA_PERSONAL_KEY_<NAME>` | That agent's bearer token. **A real one is a secret and the owner's** (`AGENTS.md`); it is never written into a file in this repo, a test, a command in a pull request or a ticket |
 | `MYCELIA_PERSONAL_API_BASE` | The Mycelia API's base URL |
+| `MYCELIA_ENV_FILE` (optional) | A key file, default `~/.config/fleet/mycelia.env`, or `none` to switch it off. If the file exists, this agent's key is read from it and wins over the inherited one; if it exists and is unusable, the server refuses to start (`README.md`, "A rotated key"). **The file holds a real key: never read it, print it or copy it.** Tests run with it switched off (`vitest.config.ts`) |
 
 **To try a change without a real key or the real API, do not start the server by hand: use `/client-smoke`.** It drives the server over stdio with the pinned Inspector against a fake Mycelia API on 127.0.0.1, with invented values for all four variables. `npm run smoke` is the same thing run as a gate stage.
 
