@@ -51,11 +51,13 @@ The source's way first; copy, then edit; one pull request per piece. **PR A**: C
 
 **Addition A2, marked as an addition: the monthly workflow gets the daily workflow's `concurrency` block**, with its own group name and `cancel-in-progress: false`. The reason is the source's own, written in its daily workflow: "The marker check is a read-before-write, not an atomic one … Two overlapping runs would both see no open issue and both file one" (`dependabot-alerts.yml`:58 to 61; a manual dispatch can start while the scheduled run is still going). The source's monthly workflow does not have the block. Without it the count in E4 could not be relied on.
 
+**Addition A3, marked as an addition: one second between consecutive issue writes, in both scripts.** The reason is this repository's rule (`AGENTS.md`, Issue-driven Work Style): "Pace bulk GitHub writes: 1 s between requests, never in parallel". The source's rules carry the same line (its `AGENTS.md`:402) and its sweeps do not pace. Both scripts are synchronous, so their writes are never parallel. The pause goes through an injected function, so the tests do not wait. The rule's other half, "a refused create can still go through, so look before retrying", is already how the sweeps behave: a failed write throws, nothing is retried inside a run, and the next run reads the listing of its own issues before it creates anything.
+
 **`PROVENANCE.md` gains a section "Sweeps"**: the table above with full blob ids and the source commit, and one sentence on which `gh` helper each script uses.
 
 ## 3. What each sweep does here
 
-Common to all three: `runs-on: ubuntu-latest`; workflow-level `permissions: contents: read`; the grant below on the job; every `uses:` a 40-hex SHA with a `# vX.Y.Z` comment, which is what `scripts/verify-action-pins.mjs` checks in every job (`unpinnedRefs`). The pins: `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`, `actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0` and `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0`, all three as in `main.yml` today, and `github/codeql-action/init` and `/analyze` at `33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3`. Each sweep workflow states the Bun version with a comment to keep it equal to `CI_BUN_VERSION` in `main.yml`, the source's own pattern for its npm pin (`dependency-refresh.yml`:59 to 60). No secret other than `GITHUB_TOKEN` is named anywhere. The two sweep jobs get `timeout-minutes: 5`. That is a hung-job bound and not a sized value: no run exists to size it from before the workflow does, and the source's two sweep jobs declare none. Each is marked PROVISIONAL in its file with that reason, as `main.yml` marks its own first value, and is re-sized with the observed range, as `AGENTS.md` requires, in a change that follows the first scheduled runs.
+Common to all three: `runs-on: ubuntu-latest`; workflow-level `permissions: contents: read`; the grant below on the job; every `uses:` a 40-hex SHA with a `# vX.Y.Z` comment, which is what `scripts/verify-action-pins.mjs` checks in every job (`unpinnedRefs`). The pins: `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`, `actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0` and `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0`, all three as in `main.yml` today, and `github/codeql-action/init` and `/analyze` at `33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3`. Each sweep workflow states the Bun version with a comment to keep it equal to `CI_BUN_VERSION` in `main.yml`, the source's own pattern for its npm pin (`dependency-refresh.yml`:59 to 60). No secret other than `GITHUB_TOKEN` is named anywhere. **Timeouts.** No run of a workflow can be observed before the workflow exists, so each first value is provisional. The source's CodeQL job declares `timeout-minutes: 10`, from its own observed runs, and that value is kept. Its two sweep jobs declare none, so they get `timeout-minutes: 5`. Each is marked PROVISIONAL in its file, as `main.yml` marks its own first value, and each is re-sized from the first scheduled runs by the rule's formula (`AGENTS.md`: roughly twice the slowest run observed, rounded up to the next five minutes, with the range stated). That re-sizing is a known limitation until it is done, and it has a follow-up ticket.
 
 | | Monthly dependency refresh | Daily alert sweep | CodeQL |
 | --- | --- | --- | --- |
@@ -126,6 +128,7 @@ Whether `issues: write` also covers creating labels and milestones was not re-re
 - The issue's parent-scoped `overrides` example is npm's syntax. Whether the pinned Bun honours a nested override was not tested. The text is checked against the pinned Bun while PR C is built, or reduced to the top-level form.
 - "In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days", and scheduled runs "can be delayed" or "dropped" under load (Reported, GitHub's documentation). Nothing in the source's design or in this one reports a sweep that stopped running.
 - The first evidence on Linux, Node 22 and CI's npm is the first run.
+- **The three jobs' timeouts are provisional** until they are re-sized from the first scheduled runs (section 3, "Timeouts"); a follow-up ticket holds that work.
 - An alert that is not npm (an action, for example) is logged for a human and not filed: `SUPPORTED_ECOSYSTEM = "npm"`, the source's.
 - The source files a security bump at High on its board. Here priority belongs to the triage flow; the sweep sets none.
 
@@ -163,13 +166,18 @@ None open for this design. One addition was referred to the owner and is not par
 
 - The model job of the upstream watch, designed separately. Only six small helpers from its script are reused (A1).
 - A closing page that describes the whole process.
-- Also not proposed, since each would be an addition with no requirement behind it: the source's pin-resolving script, a watchdog for a sweep that stopped, pacing of issue writes, and removing the token from the environment of the `npm outdated` child process.
+- Also not proposed, since each would be an addition with no requirement behind it: the source's pin-resolving script, a watchdog for a sweep that stopped, and removing the token from the environment of the `npm outdated` child process.
 
-## 9. Review log
+## 9. Design review
 
-- **Design review d1 (`4e193ea`): fail, 5 findings.** The five files to be written were marked not reviewed, because they do not exist yet.
+Two rounds by the review model, before any code. Both returned a review; both verdicts were fail. The second round said "The approach can work" and accepted the answers to the first round's findings 1, 2, 3 and 5. There is no third round: every finding below is fixed or answered here.
+
+- **Round d1 (`4e193ea`): fail, 5 findings.** The five files to be written were marked not reviewed, because they do not exist yet.
   1. HIGH, the monthly sweep can file a duplicate (overlapping runs; search lag): **fixed**, by A2 and by the change under finding 3.
   2. HIGH, absence from the alert listing is not enough to clear an issue: **declined, and recorded as an accepted limitation with its bound** (section 5). The mechanism the finding names, offset paging that drops an item, is not this endpoint's documented paging (Reported). It is new logic the source does not have, so it is listed for the owner's decision and is not part of this design.
   3. HIGH, the monthly lookup by issue search is neither complete nor authoritative: **fixed**: the labelled REST listing, read to the last page (A1). Its further ask, a uniqueness and stability check on that listing, is **declined**: the source's list reader checks page shape only, and the listing is one page here (section 5).
-  4. MEDIUM, the two 5-minute timeouts are not sized from observed runs: **declined, with the text made plain** (section 3): no run can exist before the workflow does, `main.yml` is the precedent for a provisional first value, and the source's sweeps declare none.
+  4. MEDIUM, the two 5-minute timeouts are not sized from observed runs: declined in that round; raised again in d2 and answered there.
   5. MEDIUM, E4 and E5 asserted the design day's state: **fixed**: both now assert behaviour against the state read in the run.
+- **Round d2 (`273ced2`): fail, 2 findings.**
+  1. MEDIUM, the note said pacing of issue writes had no requirement behind it, while `AGENTS.md` requires one second between bulk GitHub writes: **fixed**: addition A3, and the sentence is corrected (section 8).
+  2. MEDIUM, the timeouts are not sized from observed runs: **answered** (section 3, "Timeouts"). No run of a workflow can be observed before the workflow exists. The first values are provisional: the source's own 10 minutes for CodeQL, 5 for the two sweeps, which the source leaves unbounded. Each is re-sized from the first scheduled runs by the rule's formula; that is a stated limitation with a follow-up ticket.
