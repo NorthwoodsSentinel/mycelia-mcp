@@ -24,6 +24,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -406,6 +407,91 @@ describe("the default path", () => {
       `${DEFAULT_FLEET_KEY_FILE} exists but has no MYCELIA_PERSONAL_KEY_MARGIN`,
     );
     expect(message).not.toContain(dir);
+  });
+});
+
+describe("a broken link is a key file that cannot be read, not an absent one", () => {
+  // Audit r1: opening a link whose target is missing answers "no such file",
+  // the same answer as no file at all. Read as absent, the server would start
+  // on the inherited key without a word, in the middle of a rotation.
+  const BROKEN =
+    "the file named by MYCELIA_ENV_FILE is a link whose target is missing, or lies under one";
+
+  it("[a1] the key file is a link to a target that does not exist", async () => {
+    const link = join(dir, "mycelia.env");
+    symlinkSync(join(dir, "missing-rotated-key"), link);
+    vi.stubEnv("MYCELIA_ENV_FILE", link);
+    expect(readFleetKeyFromFile("MARGIN")).toEqual({
+      kind: "error",
+      why: BROKEN,
+    });
+    const message = refusal();
+    expect(message).toContain(`refusing to start: ${BROKEN}`);
+    expect(message).not.toContain(dir);
+    expect(message).not.toContain(INHERITED);
+  });
+
+  it("a folder above the key file is a link to a target that does not exist", () => {
+    symlinkSync(join(dir, "missing-folder"), join(dir, "fleet"));
+    vi.stubEnv("MYCELIA_ENV_FILE", join(dir, "fleet", "deeper", "mycelia.env"));
+    expect(readFleetKeyFromFile("MARGIN")).toEqual({
+      kind: "error",
+      why: BROKEN,
+    });
+    expect(refusal()).toContain("refusing to start");
+  });
+
+  it("the default path is a broken link", () => {
+    vi.stubEnv("HOME", dir);
+    vi.stubEnv("USERPROFILE", dir);
+    vi.stubEnv("MYCELIA_ENV_FILE", undefined);
+    expect(homedir()).toBe(dir);
+    mkdirSync(join(dir, ".config", "fleet"), { recursive: true });
+    symlinkSync(
+      join(dir, "missing-rotated-key"),
+      join(dir, ".config", "fleet", "mycelia.env"),
+    );
+    const message = refusal();
+    expect(message).toContain(
+      `refusing to start: ${DEFAULT_FLEET_KEY_FILE} is a link whose target is missing, or lies under one`,
+    );
+    expect(message).not.toContain(dir);
+  });
+
+  it("a link that resolves is read like any file", async () => {
+    const target = join(dir, "real.env");
+    writeFileSync(target, `MYCELIA_PERSONAL_KEY_MARGIN=${GOOD}\n`);
+    const link = join(dir, "mycelia.env");
+    symlinkSync(target, link);
+    vi.stubEnv("MYCELIA_ENV_FILE", link);
+    expect(readFleetKeyFromFile("MARGIN")).toEqual({
+      kind: "key",
+      value: GOOD,
+    });
+    expect((await sentBy(MyceliaClient.fromEnv())).key).toBe(GOOD);
+  });
+
+  it("no file under a folder link that resolves is still absent", async () => {
+    mkdirSync(join(dir, "real-folder"));
+    symlinkSync(join(dir, "real-folder"), join(dir, "fleet"));
+    vi.stubEnv("MYCELIA_ENV_FILE", join(dir, "fleet", "mycelia.env"));
+    expect(readFleetKeyFromFile("MARGIN")).toEqual({ kind: "absent" });
+    expect((await sentBy(MyceliaClient.fromEnv())).key).toBe(INHERITED);
+  });
+
+  it("no file under folders that do not exist is still absent", () => {
+    vi.stubEnv("MYCELIA_ENV_FILE", join(dir, "a", "b", "c", "mycelia.env"));
+    expect(readFleetKeyFromFile("MARGIN")).toEqual({ kind: "absent" });
+  });
+
+  it("two links that point at each other cannot be read", () => {
+    symlinkSync(join(dir, "b"), join(dir, "a"));
+    symlinkSync(join(dir, "a"), join(dir, "b"));
+    vi.stubEnv("MYCELIA_ENV_FILE", join(dir, "a"));
+    expect(readFleetKeyFromFile("MARGIN")).toEqual({
+      kind: "error",
+      why: "could not read the file named by MYCELIA_ENV_FILE (ELOOP)",
+    });
   });
 });
 

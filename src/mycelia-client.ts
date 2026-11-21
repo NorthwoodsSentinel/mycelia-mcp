@@ -31,9 +31,9 @@
  *   GET    /v1/feed
  */
 
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** Where the key file is when `MYCELIA_ENV_FILE` does not name one. */
 export const DEFAULT_FLEET_KEY_FILE = "~/.config/fleet/mycelia.env";
@@ -46,7 +46,8 @@ export const FLEET_KEY_FILE_OFF = "none";
  *
  *   absent -> no file, or the file switched off (`MYCELIA_ENV_FILE=none`): the
  *             inherited environment key stands, so a host without the file
- *             behaves as it always did.
+ *             behaves as it always did. A link whose target is missing is NOT
+ *             absent (`notAbsentBecause`).
  *   key    -> the LAST VALID assignment for this agent.
  *   error  -> the file is there and cannot be read, or holds no valid key for
  *             this agent: `fromEnv()` refuses to start. Falling back to the
@@ -57,6 +58,57 @@ export type FleetKeyResult =
   | { kind: "absent" }
   | { kind: "key"; value: string }
   | { kind: "error"; why: string };
+
+/** The error code of a failed file call, or "unknown error". Never its text. */
+function codeOf(e: unknown): string {
+  return e instanceof Error && "code" in e && typeof e.code === "string"
+    ? e.code
+    : "unknown error";
+}
+
+/**
+ * Whether a path that answered "no such file" is really absent.
+ *
+ * "No such file" does not prove there is no key file. It is also the answer
+ * for a link whose target is missing, at the path itself or at any folder
+ * above it: a key file that is THERE and broken, which is plausible in the
+ * middle of a rotation. Calling that "absent" would start the server on the
+ * inherited key without a word, the one thing this reader exists to prevent
+ * (audit r1). So the path is walked upward from the file:
+ *
+ *   - the first name that exists and is a link whose target does not resolve:
+ *     NOT absent. There is a key file, and it cannot be read;
+ *   - the first name that exists and is anything else (a folder, or a link
+ *     that resolves): absent. The names below it really are not there;
+ *   - a name that cannot be examined at all: NOT absent. Absence could not be
+ *     established, and that is not the same as absent.
+ *
+ * Returns `null` for absent, or the reason it is not.
+ */
+function notAbsentBecause(path: string): string | null {
+  let current = path;
+  for (;;) {
+    let isLink: boolean;
+    try {
+      isLink = lstatSync(current).isSymbolicLink();
+    } catch (e) {
+      const code = codeOf(e);
+      if (code !== "ENOENT") return `could not be examined (${code})`;
+      const parent = dirname(current);
+      /* v8 ignore next -- @preserve: the root always exists, so the walk ends above; this only stops a loop if dirname ever returned its argument */
+      if (parent === current) return null;
+      current = parent;
+      continue;
+    }
+    if (!isLink) return null;
+    try {
+      statSync(current);
+      return null;
+    } catch {
+      return "is a link whose target is missing, or lies under one";
+    }
+  }
+}
 
 /**
  * Read ONLY this agent's key (`MYCELIA_PERSONAL_KEY_<NAME>`) from the key file.
@@ -83,12 +135,13 @@ export function readFleetKeyFromFile(agentNameUpper: string): FleetKeyResult {
   try {
     raw = readFileSync(path, "utf8");
   } catch (e) {
-    const code =
-      e instanceof Error && "code" in e && typeof e.code === "string"
-        ? e.code
-        : "unknown error";
-    if (code === "ENOENT") return { kind: "absent" };
-    return { kind: "error", why: `could not read ${where} (${code})` };
+    const code = codeOf(e);
+    if (code !== "ENOENT") {
+      return { kind: "error", why: `could not read ${where} (${code})` };
+    }
+    const reason = notAbsentBecause(path);
+    if (reason === null) return { kind: "absent" };
+    return { kind: "error", why: `${where} ${reason}` };
   }
   const want = `MYCELIA_PERSONAL_KEY_${agentNameUpper}`;
   let found: string | null = null;
