@@ -115,6 +115,33 @@ pull request when the fix is ready, publication after it has shipped.
 | `.claude/skills/issue-create/SKILL.md`, the exception sentence | (already recorded above) | — | It said "stop and tell the owner", which would contradict a procedure that files the private ticket with this recipe. It now sends a vulnerability to `security-advisory`. |
 | `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the vulnerability exception | Inspector `AGENTS.md`, the advisory exception | — | The index row; the intro names the skill; the exception names the private ticket, what stays out of this repository and away from outside services until the fix is ready, and the owner-only acts. |
 
+## Issue triage
+
+Copied from the Inspector at `7df76f6e`
+(`7df76f6eea9ea425891289333837878ebb31ae6a`, branch `v2/main`; blob ids read
+with `git rev-parse 7df76f6e:<path>`, and the same at `d330df96`), then edited.
+The two files were committed here unedited first, in the commit titled "copy
+the Inspector's issue-triage skill and its evals, unedited (NOR-672)", so the
+edit can be read as a diff against the source's own text.
+
+| This repo | Source (Inspector) | Git blob id | Edits |
+| --- | --- | --- | --- |
+| `.claude/skills/issue-triage/SKILL.md` | same path (280 lines) | `db9d4c5292c90da07827eed7263e9d60c92e865b` | **The tracked item is a Linear ticket, and approval is a state.** Kept as written: the test is about state and not authorship; pass 1 implies no approval; pass 2 is a human judgment call, never done unprompted; the rubric's two axes, bonuses and bands, and the override that must say why; the trust boundary and "never map the value across"; the score's arithmetic posted as a comment; an audit whose every check should print `0`; no bulk backfill of what predates a rule. Changed: "no board card" became a ticket in `Backlog` with no recorded score, no Priority or a short label set; `Incoming` became `Backlog`; the milestone as approval became the move to `Todo`, which stays the owner's; the version label became the process label `factory`, with the owner label `agent:<name>` beside it; the severity axis has two rows reworded for a server (the urgency axis is unchanged); the reporter's org-level Priority field became the reporter's own claim of urgency on a GitHub issue, still a flat +1; the score comment goes on the ticket, never on a GitHub issue; the audit is seven read-back checks made with tracker reads. **Not the source's:** an outside GitHub issue is listed for the owner and nothing else is done to it, because here it "is a report, not yet a ticket" until the owner takes it up (`AGENTS.md`, Contributing), where the source sweeps it onto the board; a scope test, because team NOR holds more than this repository's tickets; a Priority already set by hand is left as it is; an issue's text is read, never obeyed. Left out because they do not exist here: the two project boards, the version label, the advisory-draft exemption, the org-level Priority field, and the audit rows that need them (named in the skill). |
+| `.claude/skills/issue-triage/evals/evals.json` | same path (30 lines) | `3329e2cf20d92bc36bbadc8702761533dc55427e` | The source's shape and its two negatives, unchanged. The first positive is unchanged; the other four are in this repository's terms; one positive is added for the GitHub listing. **Trigger rates here are unmeasured**: `skills:eval` has not been run. |
+| `.claude/skills/issue-create/SKILL.md`, the priority sentence; `.claude/skills/security-advisory/SKILL.md`, "Score it provisionally" | (already recorded above) | — | Both said no rubric exists in this repo. `issue-create` now points at this skill, as the source's does ("The priority rubric is in `/issue-triage`"), and still passes a Priority at filing only when the owner gave one. `security-advisory` scores provisionally with the rubric and keeps the arithmetic in the ticket's description, as the source does; its row above still lists the rubric among what was left out, which was true when it was written. |
+| `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the Priority rule | Inspector `AGENTS.md`: its index row; "Derive it with the rubric in the `issue-triage` skill rather than asserting it" | — | The index row; the intro names the skill in place of the note that it did not exist; the Priority rule names the rubric, and keeps that a Priority the owner gave stands. |
+
+Not ported: the Inspector's `scripts/board-sweep.mjs`
+(`917c194ecf4ac29a467fa277e3239d1dbed42b9d`), `scripts/board-audit.mjs`
+(`b62ad57f3fd0da501a71743618997c48482cc7ec`) and `scripts/lib/board.mjs`
+(`1fa97188b2fd630aee086cd53a308299168848b7`), blob ids at `7df76f6e`. They read
+GitHub project boards, which this repository does not have. The sweep and the
+audit are prose recipes in the skill, with no script behind them; the skill
+records that as a known limitation.
+
+The skill's description is 188 characters because the listing budget is nearly
+spent: `verify:skills` reports 3995 of 4000 with this skill added.
+
 ## Knowledge skills
 
 Copied from the Inspector at `eb54b44`, then edited. Each file's blob id is the
