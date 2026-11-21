@@ -3,11 +3,14 @@
 # In this repo: copied from modelcontextprotocol/inspector at commit
 # 7df76f6eea9ea425891289333837878ebb31ae6a, .github/workflows/codeql.yml, by
 # copy then edit (the unchanged file is this file's first commit here). The
-# "#NNNN" numbers below are the source repository's issues. Edits: the branch
-# list is `main` only, on `push` and on `pull_request`; this header; the note
-# on the timeout. Nothing else: the languages, the query suite, the
-# permissions, the concurrency group and the pins are the source's. Record:
-# PROVENANCE.md, "Sweeps". Design: docs/DESIGN-nor-673-sweeps.md.
+# "#NNNN" numbers below are the source repository's issues. Edits, four: the
+# branch list is `main` only, on `push` and on `pull_request`; this header;
+# the note on the timeout; the comment on the cron line (the source calls the
+# slot "default setup's old slot", which is its own history: default setup
+# never ran here). Nothing else: the languages, the query suite, the
+# permissions, the concurrency group, the cron expression and the pins are
+# the source's. Record: PROVENANCE.md, "Sweeps". Design:
+# docs/DESIGN-nor-673-sweeps.md.
 #
 # The source adopted this file to replace CodeQL DEFAULT setup, which analyzes
 # only the default branch and pull requests into it, because it develops on a
