@@ -18,6 +18,8 @@ Sources:
 | `AGENTS.md`              | Inspector `AGENTS.md`                 | Section by section. Kept: issue-driven work, review handling, testing and the per-file 90 bar, timeouts, the pre-push gate, waiting, build output, lint with no warning tier, TypeScript rules, skills maintenance. Left out: his folder tree, web, React, auth-token and release sections (no such parts here). Adapted: Linear for the board, `main` as the only branch, owner-merged PRs. |
 | `CLAUDE.md`              | Inspector `CLAUDE.md`                 | Same one line: `@./AGENTS.md`.                                                                                                                                                                                                                                            |
 
+**One sentence of `AGENTS.md` is this repository's own and changed with NOR-648.** The opening statement that the server "acts with one agent identity's bearer token, read from the environment, and nothing else" described the server before it could read its key from a key file. It now says the token comes from the environment or, when a key file is present, that one value comes from the file, and that the agent id and the API's address come from the environment only. It is not from the Inspector; the design is `docs/DESIGN-nor-648-fleet-key-file.md`.
+
 ## Gate
 
 | This repo                          | Source                                                                         | Edits                                                                                                                                            |

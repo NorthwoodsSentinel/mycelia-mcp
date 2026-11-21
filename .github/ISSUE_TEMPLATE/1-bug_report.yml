@@ -86,7 +86,8 @@ body:
         Host: Claude Code 2.1.250
         Command: bun ~/mycelia-mcp/src/index.ts
         Environment: MYCELIA_MCP_AGENT_NAME, MYCELIA_PERSONAL_AGENT_ID_<NAME>,
-          MYCELIA_PERSONAL_KEY_<NAME>, MYCELIA_PERSONAL_API_BASE (names only, no values)
+          MYCELIA_PERSONAL_KEY_<NAME>, MYCELIA_PERSONAL_API_BASE, MYCELIA_ENV_FILE
+          (names only, no values; say whether a key file exists, never what is in it)
     validations:
       required: true
 

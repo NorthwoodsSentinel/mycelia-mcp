@@ -2,7 +2,7 @@
 
 mycelia-mcp is a small MCP server, written in TypeScript and run on Bun, that wraps the Mycelia mutual-aid HTTP API. It serves eight tools over stdio (`src/index.ts`); `src/mycelia-client.ts` is the HTTP client behind them. It is a public repository; there is no UI. The owner picks what gets worked on.
 
-**It acts with one agent identity's bearer token, read from the environment, and nothing else.** Every id that goes into a URL path is checked against a safe-token pattern before it is encoded, list limits are bounded, a transport error never echoes its raw message, and a non-JSON upstream reply becomes a typed error.
+**It acts with one agent identity's bearer token and nothing else. The token is read from the environment, or, when a key file is present, that one value is read from the file (`README.md`, "A rotated key"); the agent id and the API's address come from the environment only.** Every id that goes into a URL path is checked against a safe-token pattern before it is encoded, list limits are bounded, a transport error never echoes its raw message, and a non-JSON upstream reply becomes a typed error.
 
 **This file holds the _rules_: the conventions a reviewer cites against a diff.** It is loaded in full on every turn, so it stays resident and must stay complete enough to work from on its own.
 

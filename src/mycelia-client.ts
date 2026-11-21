@@ -11,14 +11,14 @@
  *
  * Where <NAME> is the value of MYCELIA_MCP_AGENT_NAME (e.g. "MARGIN").
  *
- * Credential freshness — for the API KEY only, the file wins over the inherited env.
- * `mycelia-refresh` (zshrc) writes rotated keys to ~/.config/fleet/mycelia.env.
- * An MCP server started by a long-lived parent process inherits whatever that
- * parent's env held at ITS start, so after a rotation the inherited key is
- * stale and every call 401s while the file on disk is correct. Observed
- * 2026-08-07: file key returned 200, MCP returned UNAUTHORIZED. So the file
- * is read at construction and OVERRIDES the inherited values. Absent file =
- * no-op; hosts without it (Lares) keep pure env behaviour.
+ * Credential freshness: for the API KEY only, a key file wins over the inherited
+ * environment. A server started by a long-lived parent process inherits whatever
+ * that parent's environment held at ITS start, so after a key rotation the
+ * inherited key is stale and every call is refused while the rotated key sits
+ * on disk. So this agent's key, and nothing else, is read from the key file at
+ * construction (`readFleetKeyFromFile`). A host with no such file keeps pure
+ * environment behaviour. The design and its review log are
+ * docs/DESIGN-nor-648-fleet-key-file.md.
  *
  * The Mycelia API surface is JSON over HTTPS with Bearer auth. Endpoints used:
  *   GET    /v1/agents/{agent_id}
@@ -35,58 +35,92 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** Where the key file is when `MYCELIA_ENV_FILE` does not name one. */
+export const DEFAULT_FLEET_KEY_FILE = "~/.config/fleet/mycelia.env";
+
+/** The value of `MYCELIA_ENV_FILE` that switches the key file off. */
+export const FLEET_KEY_FILE_OFF = "none";
+
 /**
- * Read ONLY this agent's rotated API key (MYCELIA_PERSONAL_KEY_<NAME>) from ~/.config/fleet/mycelia.env.
- * Codex audit of c3278cd: overlaying every MYCELIA_* key let the file redirect the destination URL (even to http)
- * and switch the agent identity, and it mutated global env non-transactionally. Now: one key, returned as a value,
- * never written to process.env; base URL and agent id stay env-only.
+ * What reading the key file found.
  *
- * kintsugi: Codex final audit of 155d682, 2 HIGH: every failure other than an absent file used to fall back to the
- * inherited (possibly stale) env key. Now the result says which case happened, and only "absent" may fall back:
- *   absent  -> no file (ENOENT) or MYCELIA_ENV_FILE=none: inherited env key stands (pure-env hosts unchanged)
- *   key     -> the LAST VALID assignment for this agent (malformed lines are skipped loudly)
- *   error   -> the file exists but can't be read, or has no valid key for this agent: fromEnv() refuses to start
+ *   absent -> no file, or the file switched off (`MYCELIA_ENV_FILE=none`): the
+ *             inherited environment key stands, so a host without the file
+ *             behaves as it always did.
+ *   key    -> the LAST VALID assignment for this agent.
+ *   error  -> the file is there and cannot be read, or holds no valid key for
+ *             this agent: `fromEnv()` refuses to start. Falling back to the
+ *             inherited key here would be the silent stale key this exists to
+ *             prevent.
  */
 export type FleetKeyResult =
   | { kind: "absent" }
   | { kind: "key"; value: string }
   | { kind: "error"; why: string };
 
+/**
+ * Read ONLY this agent's key (`MYCELIA_PERSONAL_KEY_<NAME>`) from the key file.
+ *
+ * One value, returned and never written to `process.env`. The base URL and the
+ * agent id stay environment-only, so the file cannot redirect the destination
+ * or switch the identity (an earlier version overlaid every `MYCELIA_*` name
+ * and could do both).
+ *
+ * ⚠️ No message built here may carry a value. A malformed assignment is named
+ * by its variable, never quoted. A path given in `MYCELIA_ENV_FILE` is never
+ * echoed either: someone who puts a key where the path belongs must not get it
+ * back in a log (design review r1). Only the fixed default path is named.
+ */
 export function readFleetKeyFromFile(agentNameUpper: string): FleetKeyResult {
   const configured = process.env.MYCELIA_ENV_FILE;
-  if (configured === "none") return { kind: "absent" };
+  if (configured === FLEET_KEY_FILE_OFF) return { kind: "absent" };
   const path = configured ?? join(homedir(), ".config", "fleet", "mycelia.env");
+  const where =
+    configured === undefined
+      ? DEFAULT_FLEET_KEY_FILE
+      : "the file named by MYCELIA_ENV_FILE";
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException)?.code;
+    const code =
+      e instanceof Error && "code" in e && typeof e.code === "string"
+        ? e.code
+        : "unknown error";
     if (code === "ENOENT") return { kind: "absent" };
-    return { kind: "error", why: `could not read ${path} (${code ?? String(e)})` };
+    return { kind: "error", why: `could not read ${where} (${code})` };
   }
   const want = `MYCELIA_PERSONAL_KEY_${agentNameUpper}`;
   let found: string | null = null;
   let malformed = 0;
   for (const line of raw.split("\n")) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
-    if (!m || m[1] !== want) continue;
+    const m = /^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$/.exec(line);
+    if (m?.[1] !== want) continue;
     let value = (m[2] ?? "").trim();
-    if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value[value.length - 1] === value[0]) {
+    const quote = value[0];
+    if (
+      value.length >= 2 &&
+      (quote === '"' || quote === "'") &&
+      value.endsWith(quote)
+    ) {
       value = value.slice(1, -1);
     }
-    if (!/^[A-Za-z0-9._~+\/=-]{16,512}$/.test(value)) {
+    if (!/^[A-Za-z0-9._~+/=-]{16,512}$/.test(value)) {
       malformed++;
-      console.error(`mycelia-mcp: ${want} in ${path} has a malformed assignment (ignored)`);
+      console.error(
+        `mycelia-mcp: ${want} in ${where} has a malformed assignment (ignored)`,
+      );
       continue; // a malformed line must not defeat a later valid one
     }
-    found = value; // last VALID assignment wins
+    found = value; // the last VALID assignment wins
   }
-  if (found) return { kind: "key", value: found };
+  if (found !== null) return { kind: "key", value: found };
   return {
     kind: "error",
-    why: malformed
-      ? `${path} has ${malformed} assignment(s) of ${want}, none valid`
-      : `${path} exists but has no ${want}`,
+    why:
+      malformed > 0
+        ? `${where} has ${malformed} assignment(s) of ${want}, none valid`
+        : `${where} exists but has no ${want}`,
   };
 }
 
@@ -165,12 +199,17 @@ export class MyceliaClient {
     const agentId = process.env[`MYCELIA_PERSONAL_AGENT_ID_${upper}`];
     const fileKey = readFleetKeyFromFile(upper);
     if (fileKey.kind === "error") {
-      // Fail closed: a present-but-unusable fleet file must not silently fall back to a possibly stale env key.
+      // Fail closed: a key file that is there and unusable must not fall back
+      // to an inherited key that may be stale.
       throw new Error(
-        `mycelia-mcp: refusing to start: ${fileKey.why}. Fix the file, or set MYCELIA_ENV_FILE=none to use the env key.`,
+        `mycelia-mcp: refusing to start: ${fileKey.why}. ` +
+          "Fix the file, or set MYCELIA_ENV_FILE=none to use the environment key.",
       );
     }
-    const apiKey = fileKey.kind === "key" ? fileKey.value : process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
+    const apiKey =
+      fileKey.kind === "key"
+        ? fileKey.value
+        : process.env[`MYCELIA_PERSONAL_KEY_${upper}`];
     const baseUrl = process.env.MYCELIA_PERSONAL_API_BASE;
     if (!agentId)
       throw new Error(`MYCELIA_PERSONAL_AGENT_ID_${upper} is not set`);

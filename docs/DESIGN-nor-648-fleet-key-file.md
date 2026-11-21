@@ -2,7 +2,7 @@
 
 Status: design, for review by the review model before the carried code is adapted.
 Ticket: NOR-648, a named item of NOR-125.
-Carried from: pull request 2 of this repository, branch `fix/fleet-env-file-overlay`, six commits `2a78d7a..303ea0e` (2026-11-08 to 2026-11-11). They applied to `main` at `7c53bba` without conflict. The commit that carries this note holds them **as carried, not yet adapted**: `src/mycelia-client.ts` (the reader and its use in `fromEnv`) and `src/fleet-key.test.ts` (written for another test runner; it does not run under this repository's gate yet).
+Carried from: pull request 2 of this repository, branch `fix/fleet-env-file-overlay`, six commits `2a78d7a..303ea0e` (2026-11-08 to 2026-11-11). They applied to `main` at `7c53bba` without conflict. The first commit of this branch holds them **as carried, not yet adapted**: `src/mycelia-client.ts` (the reader and its use in `fromEnv`) and `src/fleet-key.test.ts` (written for another test runner; it does not run under this repository's gate yet).
 
 Words used below. **Measured**: run or counted for this design on 2026-11-21 (UTC), macOS arm64. **Read**: read in the named file. **UNKNOWN**: not established.
 
@@ -76,4 +76,13 @@ The smoke run already starts the server with a scratch home folder (Read, `scrip
 
 ## 7. Review log
 
-- Design review r1: (not yet run)
+- **Design review r1 (`b95fa6c`): 5 findings, all accepted; its coverage of the three settled behaviours found them done as written.**
+  1. HIGH, a path given in `MYCELIA_ENV_FILE` was echoed in the refusal and in the malformed-line message, so a key put where the path belongs would be printed: **accepted**. No message carries a configured path; it is called "the file named by MYCELIA_ENV_FILE". Only the fixed default spelling is named. The raw error text, which also carries the path, is no longer used; the error code is.
+  2. MEDIUM, no test asserted that messages carry no credential: **accepted**. The test file captures everything printed and thrown and asserts the absence of the valid, malformed, inherited and path-carried values.
+  3. MEDIUM, expected error output was not suppressed: **accepted**. `console.error` is captured in every test and its exact text asserted where a message is expected.
+  4. MEDIUM, the default path had no behavioural test: **accepted, done in the same process.** The review wrote it as a subprocess. Here the home folder is pointed at a scratch directory, and the test stops before reading anything if that did not take effect.
+  5. MEDIUM, the rules-file sentence changes without a provenance entry: **accepted** (`PROVENANCE.md`, Rules file).
+  - Its six attack cases are in the test file with their labels. One is kept with its expected result corrected: case 1 expects a refusal for a configured path that does not exist, and by the settled behaviour a missing file is absent and does not refuse. The case is kept as written with the corrected result, and a second form of it (the path exists and is a directory) reaches the refusal the case was written to inspect.
+  - Checked by removing each behaviour in turn: echoing the configured path failed 8 of the file's 23 tests; falling back on an unusable file failed 9; removing the test-wide switch failed 6 of the whole suite's 85 on a machine that has a key file.
+  - No second design round: every finding is accepted, and the audit is on the exact commit.
+- Audit, on the exact commit: (not yet run)

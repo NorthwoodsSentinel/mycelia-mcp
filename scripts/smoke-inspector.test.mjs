@@ -410,6 +410,7 @@ test("the server gets the placeholder identity and the fake's base URL only", ()
     MYCELIA_PERSONAL_AGENT_ID_SMOKE: "smoke-agent",
     MYCELIA_PERSONAL_KEY_SMOKE: SMOKE_AGENT.key,
     MYCELIA_PERSONAL_API_BASE: "http://127.0.0.1:1",
+    MYCELIA_ENV_FILE: "none",
   });
   assert.match(SMOKE_AGENT.key, /placeholder/);
 });

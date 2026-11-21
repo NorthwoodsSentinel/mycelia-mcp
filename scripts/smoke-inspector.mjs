@@ -416,6 +416,10 @@ export function judge(c, run, era) {
  * The server's own variables: the placeholder identity and the fake API's
  * base URL. They are added to `baseEnv`, so no inherited MYCELIA_ variable
  * (a real key) reaches the server under test.
+ *
+ * `MYCELIA_ENV_FILE=none` switches the server's key file off (NOR-648). The
+ * scratch HOME already leaves that file absent; the switch says so outright,
+ * so the placeholder key is the key under test whatever the home folder is.
  */
 export function serverEnv(apiBase, agent = SMOKE_AGENT) {
   return {
@@ -423,6 +427,7 @@ export function serverEnv(apiBase, agent = SMOKE_AGENT) {
     [`MYCELIA_PERSONAL_AGENT_ID_${agent.name}`]: agent.id,
     [`MYCELIA_PERSONAL_KEY_${agent.name}`]: agent.key,
     MYCELIA_PERSONAL_API_BASE: apiBase,
+    MYCELIA_ENV_FILE: "none",
   };
 }
 

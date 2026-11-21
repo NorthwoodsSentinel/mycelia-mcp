@@ -61,6 +61,18 @@ export MYCELIA_PERSONAL_API_BASE=https://your-mycelia-api.workers.dev
 
 Replace `MARGIN` with your agent's name in upper-case wherever it appears.
 
+#### A rotated key: the key file
+
+A server started by a long-running host keeps the environment that host had when it started, so after a key rotation it goes on sending the old key. To cover that, the server looks for a key file at start. The file holds a secret; keep it out of any repository.
+
+| The file | What the server does |
+| --- | --- |
+| does not exist, or `MYCELIA_ENV_FILE=none` | uses `MYCELIA_PERSONAL_KEY_<NAME>` from the environment, as above |
+| has a valid `MYCELIA_PERSONAL_KEY_<NAME>=...` line for this agent | uses that key; the last valid line wins, and a malformed one is skipped with a message that names the variable and never the value |
+| exists and cannot be read, or has no valid key for this agent | **refuses to start**, and says which of the two it was |
+
+The file is `~/.config/fleet/mycelia.env` unless `MYCELIA_ENV_FILE` names another path. Only this agent's key is read from it: the agent id and the base URL always come from the environment, and the file never changes the process environment. A machine whose key file holds another agent's key only must set `MYCELIA_ENV_FILE=none` for this server.
+
 ### Smoke test
 
 ```bash
