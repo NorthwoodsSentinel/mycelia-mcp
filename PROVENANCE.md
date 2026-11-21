@@ -78,6 +78,28 @@ MCP reference servers' adaptation of the Inspector's screenshot rule
 | `AGENTS.md`: Skills index row; Issue-driven Work Style intro; the evidence rule; the exception in Only the owner does | Inspector `AGENTS.md` ("Attach screenshots as proof of functionality"); servers inception doc, section 3.2 | — | The index row; the intro names `pr-flow`; a new rule, client evidence in place of screenshots, so the evidence step is a rule here and not only a step in a skill. "Only the owner does" listed anything public as the owner's while Contributing has an agent open pull requests and run the review; the owner settled it on 2026-11-19 with a named exception for four acts (push a branch, open a pull request, comment on it, send the diff to the review model), written into that list (Codex audit of `36d5b04`, finding 1). |
 | `.claude/skills/board-ops/SKILL.md`, and its index row | (already recorded above) | — | Three wording fixes: the description and the index row name all four preconditioned states (`In Review` was added to the skill and not to its summaries); in "Close as Duplicate" the instruction to save anything worth keeping now comes before the step that closes the issue. |
 
+### The pr-flow helper scripts (NOR-610)
+
+Three steps of `pr-flow` carried their checks as shell blocks or prose, and the
+last audit of the skill found a probe that fails could read as a pass in each.
+The Inspector answers the same class of defect with helper scripts under test
+(its `scripts/lib/gh.mjs` header: the scripts "replace command blocks that the
+skills previously transcribed inline"). Its library was copied; the three
+scripts are this repository's own, because the Inspector has no step that ties
+a gate result to a commit and no hand-off to an owner who merges (its
+`gate-lease.mjs` is a lease between concurrent gates, a different thing). The
+design, the measurements behind the verdict rule and the review log are in
+`docs/DESIGN-nor-610-pr-flow-scripts.md`.
+
+| This repo | Source at `d330df96` | Edits |
+| --- | --- | --- |
+| `scripts/lib/gh.mjs` | Inspector `scripts/lib/gh.mjs`, blob `84752059afe75329c5936cf91772795c2e6b4873` | Copy then edit. `OWNER` and `REPO` name this repository. Removed, unused here: `COPILOT_REVIEWER_LOGIN`, `ghGraphql`, `ghPaginatedList`. Added: `ghPaginatedObject`, for endpoints that answer with one object per page and a `total_count`; it throws unless the pages agree on the total, the items match it, and every item has an integer `id` seen once. |
+| `scripts/lib/gh.test.mjs` | Inspector `scripts/lib/gh.test.mjs`, blob `5aead316c1f39705cb7b971573d5b28787929da2` | Copy then edit. The tests of the three removed exports are removed; the tests of `ghPaginatedObject` are added. Joined to `test:scripts`. |
+| `scripts/gate-run.mjs`, test | none | Written here. Replaces the shell block of `pr-flow` step 4. |
+| `scripts/handoff-check.mjs`, test | none | Written here. Replaces the shell block of `pr-flow` step 7. Reads the combined commit status where the block read the plain statuses listing. |
+| `scripts/audit-verdict.mjs`, test | none | Written here. Defines the verdict of `pr-flow` step 6a. |
+| `.claude/skills/pr-flow/SKILL.md` | as in the table above | Steps 4 and 7 name the scripts in place of their blocks; step 6a reads the verdict with the script; the first known limitation says what the scripts do and do not enforce. |
+
 ## Security advisory
 
 Copied from the Inspector at `eb54b44` (the skill is unchanged there since

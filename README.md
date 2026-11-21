@@ -164,6 +164,7 @@ Override the tier per call via the `tier` parameter on any tool that accepts it.
 bun install --frozen-lockfile
 npm run local:gate   # the pre-push gate: everything CI runs, plus the local sign-off check
 bun src/index.ts     # run the server (waits on stdio)
+npm run gate:run     # the gate, with the commit its result belongs to (the pr-flow skill, step 4)
 npm run skills:eval  # by hand only (spends model calls): the skills' trigger evals, Claude runner
 ```
 

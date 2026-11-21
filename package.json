@@ -13,7 +13,7 @@
     "verify:action-pins": "node scripts/verify-action-pins.mjs",
     "verify:skills": "node scripts/verify-skills.mjs",
     "verify:format-coverage": "node scripts/verify-format-coverage.mjs",
-    "test:scripts": "node --test scripts/verify-action-pins.test.mjs && node --test scripts/dco-check.test.mjs && node --test scripts/lib/main-module.test.mjs && node --test scripts/smoke-inspector.test.mjs && node --test scripts/lib/skill-manifest.test.mjs && node --test scripts/lib/npm-scripts.test.mjs && node --test scripts/verify-skills.main.test.mjs && node --test scripts/entry-points.test.mjs && node --test scripts/verify-skills-cli.test.mjs && node --test scripts/skill-eval.test.mjs && node --test scripts/lib/claude-cli.test.mjs && node --test scripts/lib/win-shell-args.test.mjs && node --test scripts/lib/workflow-gate.test.mjs && node --test scripts/lib/bun-lock.test.mjs && node --test scripts/verify-install-fresh.test.mjs && node --test scripts/verify-format-coverage.test.mjs && node --test scripts/ts-inventory.test.mjs && node --test scripts/verify-typecheck-coverage.test.mjs && node --test scripts/inventory-attack.test.mjs && node --test scripts/verify-coverage-scope.test.mjs && node --test scripts/coverage-attack.test.mjs",
+    "test:scripts": "node --test scripts/verify-action-pins.test.mjs && node --test scripts/dco-check.test.mjs && node --test scripts/lib/main-module.test.mjs && node --test scripts/smoke-inspector.test.mjs && node --test scripts/lib/skill-manifest.test.mjs && node --test scripts/lib/npm-scripts.test.mjs && node --test scripts/verify-skills.main.test.mjs && node --test scripts/entry-points.test.mjs && node --test scripts/verify-skills-cli.test.mjs && node --test scripts/skill-eval.test.mjs && node --test scripts/lib/claude-cli.test.mjs && node --test scripts/lib/win-shell-args.test.mjs && node --test scripts/lib/workflow-gate.test.mjs && node --test scripts/lib/bun-lock.test.mjs && node --test scripts/verify-install-fresh.test.mjs && node --test scripts/verify-format-coverage.test.mjs && node --test scripts/ts-inventory.test.mjs && node --test scripts/verify-typecheck-coverage.test.mjs && node --test scripts/inventory-attack.test.mjs && node --test scripts/verify-coverage-scope.test.mjs && node --test scripts/coverage-attack.test.mjs && node --test scripts/lib/gh.test.mjs && node --test scripts/audit-verdict.test.mjs && node --test scripts/gate-run.test.mjs && node --test scripts/handoff-check.test.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}\"",
     "lint": "eslint . --max-warnings 0",
@@ -25,6 +25,9 @@
     "local:dco": "node scripts/dco-check.mjs --base origin/main",
     "local:gate": "npm run validate && npm run local:dco && npm run verify:skills:cli && npm run smoke",
     "verify:skills:cli": "node scripts/verify-skills-cli.mjs",
+    "gate:run": "node scripts/gate-run.mjs",
+    "handoff:check": "node scripts/handoff-check.mjs",
+    "audit:verdict": "node scripts/audit-verdict.mjs",
     "skills:eval": "node scripts/skill-eval.mjs"
   },
   "dependencies": {
