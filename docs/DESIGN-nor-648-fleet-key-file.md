@@ -1,6 +1,6 @@
 # DESIGN: NOR-648: this agent's rotated key from the fleet key file
 
-Status: design, for review by the review model before the carried code is adapted.
+Status: built. Written as a design for review before the carried code was adapted; the review and audit rounds, and what each changed, are in section 7.
 Ticket: NOR-648, a named item of NOR-125.
 Carried from: pull request 2 of this repository, branch `fix/fleet-env-file-overlay`, six commits `2a78d7a..303ea0e` (2026-11-08 to 2026-11-11). They applied to `main` at `7c53bba` without conflict. The first commit of this branch holds them **as carried, not yet adapted**: `src/mycelia-client.ts` (the reader and its use in `fromEnv`) and `src/fleet-key.test.ts` (written for another test runner; it does not run under this repository's gate yet).
 
@@ -87,4 +87,6 @@ The smoke run already starts the server with a scratch home folder (Read, `scrip
   - No second design round: every finding is accepted, and the audit is on the exact commit.
 - **Audit r1 (`fa64644`): fail, 1 finding.** It found no path that prints or throws a key or a configured path, including through the fatal handler, and no test that can open a key file in the real home folder.
   1. HIGH, a key file that is a link whose target is missing was read as absent, so the server started on the inherited key without a word: **accepted; reproduced first** (the server started, exit 0, no refusal). "No such file" is no longer taken as absence by itself: the path is walked upward, and a link that does not resolve, at the file or at any folder above it, is a key file that cannot be read. Seven tests: the three broken-link forms refuse, a link that resolves is read, and a missing file under real folders or under a folder link that resolves is still absent. With the check removed, 3 of the file's 30 tests fail.
-- Audit r2, on the exact commit: (not yet run)
+- **Audit r2 (`a4717f8`): fail, 1 finding, LOW.** It found round 1's finding closed with each case covered by a test, no message or log path carrying a key, a configured path or raw system error text, and the upward walk unable to call a present, unreadable file absent or to loop. It could not run the tests (no installed dependencies and no network in its read-only checkout) and marked the run, the gate and CI as not reviewed; those ran in the local gate and in CI on that commit.
+  1. LOW, this note's status line still said it was awaiting review before the adaptation: **accepted**, corrected in the commit that carries this entry. That commit changes this file only.
+  - Two rounds have failed, so the goal was re-read: carry the change onto `main` with its three behaviours intact and no credential in any message. Round 2 confirms that, and its one finding is a line of this note. No third round is run; the commit after the audited one is named in the hand-off.
