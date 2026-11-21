@@ -4,19 +4,23 @@
     "expect": "issue-triage"
   },
   {
-    "prompt": "How do I decide what Priority an incoming issue deserves?",
+    "prompt": "How do I decide what Priority a ticket in Backlog deserves?",
     "expect": "issue-triage"
   },
   {
-    "prompt": "Audit the project board for anything that has drifted.",
+    "prompt": "Audit the NOR tickets for anything that has drifted.",
     "expect": "issue-triage"
   },
   {
-    "prompt": "How do I find the issues that aren't on either board yet?",
+    "prompt": "How do I find the tickets in Backlog that nobody has triaged yet?",
     "expect": "issue-triage"
   },
   {
-    "prompt": "After scoring an issue against the rubric, what do I do with the score?",
+    "prompt": "After scoring a ticket against the rubric, what do I do with the score?",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "List the open GitHub issues that have no NOR ticket yet.",
     "expect": "issue-triage"
   },
   {
