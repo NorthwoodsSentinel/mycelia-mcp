@@ -54,7 +54,7 @@ A public issue about an unfixed vulnerability discloses it. The tracking is a **
 
 ⚠️ **A ticket's words leak through habits.** A branch name, a commit subject and a PR title are all commonly written from the ticket's title. Before step 5, none of them exists in public; in step 5, write each one about the change, never from the `[SEC]` title.
 
-**Score it provisionally.** No priority rubric exists yet in this repo (`AGENTS.md`), so the agent does not set Priority. Put the claimed severity, and why, in the description, marked **provisional** and dated, and revise it at the end of step 2. Leave the provisional one in place and add the revision under it, so the change of view is legible.
+**Score it provisionally**, with the rubric in `/issue-triage`: score what the report claims and set that Priority. Put the score's arithmetic, with the claimed severity and why, in the description, marked **provisional** and dated, and revise it at the end of step 2. Leave the provisional one in place and add the revision under it, so the change of view is legible.
 
 **A vulnerability you found yourself** (in a review, in a test, while reading the code) has no advisory yet. Track it the same way, with `[SEC]` and no GHSA in the title, and say so to the owner: opening a draft advisory for it is the owner's act.
 
