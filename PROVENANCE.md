@@ -165,6 +165,25 @@ Not ported, with the reason in that design: the Inspector's `verify-install-scri
 | `.claude/skills/pre-push-gate/SKILL.md` | same path, `c43fbdde9a72e665c54560716093f649cd1360fa` | `e82a660a98b1d890e5e22d887d27ad6ca25b7038` | Rewritten for this repository's stages. Kept from the Inspector: verify by exit code, wait in the background without polling, one triage section per stage. Its run command printed the gate's status and ended with `echo`'s; here it also ends with the gate's status. Each stage's failure line is quoted from the script that prints it. Left out: the browser, Storybook, per-client, gate-lease and publish sections. |
 | `.claude/skills/pre-push-gate/evals/evals.json` | same path, `63b4309f8b2aaf4dfccccb81b1379639f6170432` | none kept | Five positive cases written for this repository, and the Inspector's two negatives unchanged. Trigger rates are unmeasured: `skills:eval` has not been run. |
 
+## Sweeps
+
+The Inspector's scheduled workflows, copied from its branch `v2/main` at commit
+`7df76f6eea9ea425891289333837878ebb31ae6a` (blob ids read with
+`git rev-parse 7df76f6e:<path>`) and then edited. The design for all three
+pieces, its two review rounds and the limitations accepted from them are in
+`docs/DESIGN-nor-673-sweeps.md`. The pieces arrive one pull request at a time,
+and this table gains a row with each. The first is CodeQL; the monthly
+dependency refresh and the daily alert sweep are not in this repository yet.
+
+| This repo | Source (Inspector) | Git blob id | Edits |
+| --- | --- | --- | --- |
+| `.github/workflows/codeql.yml` | same path (77 lines) | `f2cd576c6204cf5764e3090e93a033b12589b5ca` | The unchanged file is its first commit here. Edits: the branch list is `main` only, on `push` and on `pull_request` (the source also names its second branch); the header, which says why the source's reason for the file does not apply to a repository with one branch and why it is adopted all the same; the timeout's comment, which marks the source's 10 minutes as provisional here until this repository's runs can size it. Unchanged: the languages, the query suite, the permissions, the concurrency group and the pins. Both pins were looked up again on 2026-11-21: tag `v7.0.1` of `actions/checkout` is commit `3d3c42e5aac5ba805825da76410c181273ba90b1`, and tag `v4.39.3` of `github/codeql-action` is commit `33d7b85da1a04171e211befe2c739303b9a4c066`. |
+| `docs/quality-gate.md`, the CodeQL paragraph | same path, its CodeQL paragraph | `81bd6e7cdea552c428be71c9cb6d9ea3e5c0603a` | The source's paragraph with this repository's one branch. Left out: its issue links and the history of its second branch. Added: what "no local-gate counterpart" means here. |
+| `.claude/skills/project-structure/SKILL.md`, the workflows row; the header of `scripts/lib/workflow-gate.test.mjs` | (already recorded above) | — | Each names the third workflow file. |
+
+One repository setting makes the workflow work, and it is the owner's: CodeQL
+default setup stays not set up. It was `not-configured` when this was written.
+
 ## Contribution policy, issue forms and security policy
 
 Copied from the Inspector at `eb54b44` (blob ids read with
