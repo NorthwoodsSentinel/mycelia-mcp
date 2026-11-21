@@ -71,24 +71,15 @@ A sign-off certifies the commit in **your own name**. Never fabricate someone el
 
 ## 4. Run the gate
 
-`npm run format`, **commit**, then `npm run local:gate`. `npm run validate` is **not** a substitute (`AGENTS.md`, Mandatory pre-push gate).
+`npm run format`, **commit**, then the gate, `npm run local:gate`, through `npm run gate:run` as below. `npm run validate` is **not** a substitute (`AGENTS.md`, Mandatory pre-push gate).
 
-⚠️ **A gate result belongs to a commit only when the gate exited 0 on a clean tree and the commit did not move.** The gate reads the working tree, not the commit: a repair left uncommitted passes the gate while the commit that gets pushed is still broken. So run it this way:
+⚠️ **A gate result belongs to a commit only when the gate exited 0 on a clean tree and the commit did not move.** The gate reads the working tree, not the commit: a repair left uncommitted passes the gate while the commit that gets pushed is still broken. So run it this way, from the worktree, with nothing after it on the line:
 
 ```sh
-if [ -n "$(git status --porcelain)" ]; then
-  echo "NO PASS: the tree is not clean; commit first"
-else
-  GATED=$(git rev-parse HEAD); npm run local:gate; rc=$?
-  if [ "$rc" -eq 0 ] && [ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" = "$GATED" ]; then
-    echo "gate passed on $GATED"
-  else
-    echo "NO PASS: gate exit=$rc, or the tree or HEAD changed while it ran"
-  fi
-fi
+npm run gate:run
 ```
 
-**No `gate passed on` line, no push.** That line prints only when the gate's own exit code was 0, read directly and not through a pipe, the tree was clean before and after, and `HEAD` is still the commit the gate started on. `$GATED` is the only commit the result covers; if anything is committed afterwards, run it again.
+**No `gate passed on` line, no push.** `scripts/gate-run.mjs` prints it, as its last line and with exit 0, only when the tree was clean before, the gate's own exit code was 0, the tree was clean after and `HEAD` was the same full commit both times. Anything else ends in `NO PASS:` and its reason, and a git probe that fails is a reason of its own, never a clean answer. The commit that line names is the only commit the result covers; if anything is committed afterwards, run it again. ⚠️ The script takes no arguments, and running `npm run local:gate` yourself and writing the line by hand is not this step.
 
 ## 4a. Evidence, in place of screenshots
 
@@ -104,7 +95,7 @@ This repo has no UI, so the source's screenshot step is **evidence** (`AGENTS.md
 
 ## 5. Open the PR
 
-**The order is fixed, and `/board-ops` cannot check most of it:** `npm run format`; `npm run local:gate` exits 0 on the commit you are about to push; every commit is signed off; push **that same commit** (`git rev-parse HEAD` still equals the `$GATED` of step 4); open the PR; only then move the ticket to `In Review`. `/board-ops` checks that an open PR exists. It cannot see whether the gate ran. A ticket `In Review` on a head the gate never passed broke `AGENTS.md` (When work is complete).
+**The order is fixed, and `/board-ops` cannot check most of it:** `npm run format`; `npm run gate:run` printed `gate passed on` for the commit you are about to push; every commit is signed off; push **that same commit** (`git rev-parse HEAD` still equals the SHA on that line); open the PR; only then move the ticket to `In Review`. `/board-ops` checks that an open PR exists. It cannot see whether the gate ran. A ticket `In Review` on a head the gate never passed broke `AGENTS.md` (When work is complete).
 
 Target **`main`**. The body's **first line is `Closes NOR-<N>`**, and the body carries the evidence from 4a. The PR gets the process label **`factory` at creation**, never backfilled (`AGENTS.md`).
 
@@ -146,13 +137,21 @@ git fetch origin \
 
 Background the run and wait for its notification. Do not re-check by hand (`AGENTS.md`, Waiting on long-running work). Remove the audit worktree when the round is answered (`git worktree remove "$AUDIT"`).
 
-**Reading the result.** A round has exactly one of four outcomes:
+**Reading the result.** First the wrapper's exit: a timeout or any other non-zero exit decides the round before the message is read. Then read **this run's** final message with the script, which is the definition of "the verdict":
+
+```sh
+npm run audit:verdict -- <this round's out-dir>/last-message.txt
+```
+
+It prints `audit verdict: pass`, `fail` or `no verdict` (exit 0, 1, 2). `no verdict` covers every odd message: a missing or empty file, no verdict line, both verdicts, a verdict only inside a quoted block, or a line that starts like a verdict and is not one (`AUDIT: unknown`, `AUDIT: pass or fail`). The rule is in the header of `scripts/audit-verdict.mjs`.
+
+A round has exactly one of four outcomes:
 
 | Outcome | How it is recognised |
 |---|---|
-| **pass** | the wrapper exits 0, the verdict line of **this run's** final message is `AUDIT: pass`, **and** that message lists no findings. A `pass` that lists any finding is treated as **fail**. |
-| **fail** | the wrapper exits 0, and that verdict line is `AUDIT: fail` |
-| **no verdict** | a non-zero exit other than a timeout, a missing or empty final message, or no `AUDIT:` line in it |
+| **pass** | the wrapper exits 0, the script prints `audit verdict: pass`, **and** the message lists no findings. A `pass` that lists any finding is treated as **fail**; the script cannot see that, so read the message. |
+| **fail** | the wrapper exits 0, and the script prints `audit verdict: fail` |
+| **no verdict** | a non-zero exit other than a timeout, or the script prints `audit verdict: no verdict` |
 | **timeout** | the run outlived its budget and the wrapper stopped it |
 
 Never take a verdict from an older output file, or from an `AUDIT:` string elsewhere in the log: the model can quote one from the repository. A finding is the reviewer's **report** until you have reproduced it. Reproduce it before you fix it or decline it.
@@ -200,40 +199,15 @@ Check these on that head, and report each as read, not as assumed:
 - **What evidence was and was not run** (step 4a).
 
 ```sh
-R=NorthwoodsSentinel/mycelia-mcp
-HEAD_SHA=$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)
-if [ "${#HEAD_SHA}" -ne 40 ]; then
-  echo "NO HAND-OFF: could not resolve the head"
-else
-  gh api --paginate "repos/$R/actions/runs?head_sha=$HEAD_SHA" \
-    --jq '.workflow_runs[] | "run=\(.id) \(.path) \(.event) \(.status) \(.conclusion)"'
-  for id in $(gh api --paginate "repos/$R/actions/runs?head_sha=$HEAD_SHA" --jq '.workflow_runs[].id'); do
-    gh api --paginate "repos/$R/actions/runs/$id/jobs" \
-      --jq '.jobs[] | "run='"$id"' job=\(.name) \(.status) \(.conclusion)"'
-  done
-  gh api --paginate "repos/$R/commits/$HEAD_SHA/statuses" \
-    --jq '.[] | select(.context == "validate" or .context == "DCO") | .context'   # expect no output
-  if git fetch origin && git diff --quiet "origin/main...$HEAD_SHA" -- .github/workflows/; then
-    echo "workflows unchanged by this PR"
-  else
-    echo "THIS PR CHANGES THE WORKFLOWS, or the comparison could not be made"
-  fi
-  gh pr view <PR> -R $R --json mergeable,mergeStateStatus
-  AGAIN=$(gh pr view <PR> -R $R --json headRefOid -q .headRefOid)
-  if [ "${#AGAIN}" -eq 40 ] && [ "$AGAIN" = "$HEAD_SHA" ]; then
-    echo "head unchanged: $HEAD_SHA"
-  else
-    echo "NO HAND-OFF: the head moved or could not be read again"
-  fi
-fi
+npm run handoff:check -- <PR>
 ```
 
-**No `head unchanged` line, no hand-off.** It prints only for a full 40-character SHA read twice and equal; a lookup that fails prints `NO HAND-OFF` instead. If the head moved while you were reading, start this step again. The audited SHA of step 6 is compared with `$HEAD_SHA` too, and a difference is reported, not smoothed over.
+**No `head unchanged` line, no hand-off.** `scripts/handoff-check.mjs` prints it, as its last line and with exit 0, only when every read came back whole against one head: the runs and each run's jobs (every page, no item repeated), the commit's combined status, the workflow comparison, the mergeability, and the head read twice and equal. A read that fails or comes back short ends in `NO HAND-OFF:` naming that read, and the lines printed before it are evidence of nothing; run it again. ⚠️ **The script reads; it does not judge.** `head unchanged` does not say the runs are green or that both required workflows ran: zero runs on a head is a whole read. Judge each item above from the lines it printed, and report what they say. The audited SHA of step 6 is compared with the SHA on that line too, and a difference is reported, not smoothed over.
 
 Then give the owner the merge as **one command** that refuses a head that moved:
 
 ```sh
-gh pr merge <PR> -R NorthwoodsSentinel/mycelia-mcp --merge --match-head-commit <that HEAD_SHA, written out in full>
+gh pr merge <PR> -R NorthwoodsSentinel/mycelia-mcp --merge --match-head-commit <the SHA from the `head unchanged` line, in full>
 ```
 
 The ticket stays `In Review` until the merge. Do not run that command yourself.
@@ -264,6 +238,6 @@ git branch -D nor-<N>-<slug>
 
 ## Known limitations
 
-- **These steps describe; they do not enforce.** The source backs its steps with helper scripts (inspector#2558). No equivalent exists in this repo.
+- **Three steps compute their own result; none is enforced.** The source backs its steps with helper scripts (inspector#2558). Here steps 4, 6a and 7 have one each (`gate-run`, `audit-verdict`, `handoff-check`), so a failed or short read can no longer look like a pass. Nothing stops an agent that skips a script or types its line by hand; CI and the owner's merge are the controls. `gate-run` does not see a tracked file changed and put back while the gate ran, and writes no record. `handoff-check` does not judge whether the evidence is green. The other steps are still prose.
 - **No inline review threads.** Codex answers in one output per round, so the PR comment per round is the whole record. The source's per-thread replies have no counterpart here.
 - **The `codex-review` wrapper is the owner's tooling and is not in this repository.** This skill names how a round is run and read; it cannot show the wrapper's own interface.

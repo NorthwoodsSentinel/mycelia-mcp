@@ -87,6 +87,12 @@ CI's job has a 10-minute `timeout-minutes`, stated in `main.yml` as a hung-job g
 
 **`skills:eval`** (`scripts/skill-eval.mjs`) runs the skills' committed trigger cases against a real model. It spends metered model calls, its result is a hit rate and not a verdict, and that spending is the owner's to approve, so it is run by hand, never from `validate`, `local:gate` or CI. `verify:skills` fails if a script any of those reach names it (`AGENTS.md`, "Maintaining the skills", rule 3).
 
+**The three `pr-flow` helpers** are run by an agent at a step of that skill, not by a gate. Their tests are in `test:scripts`.
+
+- **`gate:run`** (`scripts/gate-run.mjs`) runs `local:gate` and ends with `gate passed on <sha>` only when the tree was clean before, the gate exited 0, the tree was clean after and the head was the same commit both times. A git probe that fails is a `NO PASS`, never a clean answer, and the gate is not run when the first probes cannot be read. It does not see a tracked file changed and put back while the gate ran, and it writes no record.
+- **`handoff:check`** (`scripts/handoff-check.mjs`) reads, against one head of a pull request, the workflow runs, their jobs, the combined commit status, whether the pull request changes a workflow, and the mergeability, and ends with `head unchanged: <sha>` only when every read came back whole and the head did not move. It reads and does not judge: it does not say the runs are green.
+- **`audit:verdict`** (`scripts/audit-verdict.mjs`) reads a review round's final message as `pass`, `fail` or `no verdict` by a closed rule (its header), and exits 0 only for `pass`.
+
 ## What the Inspector's page has that this one does not
 
 Recorded so their absence is not read as an omission. The verdicts are in the design note, section 2.

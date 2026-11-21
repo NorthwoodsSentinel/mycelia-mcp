@@ -64,7 +64,7 @@ The ticket's own smallest change was "the verdict is the last line of the final 
 
 - **Fenced blocks are skipped.** A fence opens on a line indented by at most three spaces that then has three or more backticks, or three or more tildes. It closes on a later line indented by at most three spaces that has the same character, at least as many of them, and nothing after but whitespace. A fence that never closes runs to the end of the file.
 - A **candidate** is a line outside any fence, indented by at most three spaces, that begins with `AUDIT:` after at most one emphasis opener (`**`, `__`, `*` or `_`, with no space after it). A bullet (`- AUDIT: pass`, `* AUDIT: pass`), a block quote, a backticked quotation, a line indented by four or more spaces and a verdict mentioned in the middle of a sentence are not candidates.
-- A candidate is a **verdict line** only when what follows `AUDIT:` is exactly one space, then `pass` or `fail`, then at most one emphasis closer, and then either nothing but whitespace, or optional whitespace and one of `—`, `–`, `-`, `.`, `,`, `;`, `:` or `(` followed by anything. Every other candidate is **malformed**: `AUDIT: unknown`, `AUDIT: passed`, `AUDIT: pass|fail`, `AUDIT: pass or fail`.
+- A candidate is a **verdict line** only when what follows `AUDIT:` is exactly one space, then `pass` or `fail`, then at most one emphasis closer, and then one of: nothing but whitespace; a `.`, `,`, `;` or `:`; optional whitespace and a `—` or `–`; whitespace and a `-` or `(`. Anything may follow those. Every other candidate is **malformed**: `AUDIT: unknown`, `AUDIT: passed`, `AUDIT: pass|fail`, `AUDIT: pass or fail`, `AUDIT: pass-fail`. (A hyphen or a bracket needs a space before it, so that `pass-fail` and `pass(…)` written as one word are not read by their first half.)
 - Any malformed candidate: **no verdict**, whatever else the file holds. Otherwise, no verdict line: **no verdict**; one or more, all the same: that verdict; both kinds present: **no verdict**.
 - A file that is missing, unreadable, empty or only whitespace: **no verdict**.
 
@@ -121,7 +121,7 @@ All with `node --test`, every external command injected.
 
 ## 7. Review log
 
-- **Design review r1 (`7fbfb54`): fail, 4 findings; every row of its coverage matrix reviewed.** It confirmed that the planned tests reproduce the three findings on the ticket.
+- **Design review r1 (`8f6840f`; reviewed as the local commit `7fbfb54`, the same tree, before the branch's commits were re-authored and pushed): fail, 4 findings; every row of its coverage matrix reviewed.** It confirmed that the planned tests reproduce the three findings on the ticket.
   1. HIGH, a paged listing can repeat one item and drop another with `total_count` still satisfied: **accepted** (2.1, 2.3, section 3). Items read this way must carry a unique integer `id`.
   2. HIGH, the plain statuses listing has no total, so a short read looks whole: **accepted** (2.3 read 4, section 3). The combined status is read instead; measured on this repo before the change was written.
   3. HIGH, `AUDIT: pass or fail` at the start of a line was read as pass, and the fence rule was not defined: **accepted** (2.4, section 3). The grammar is closed, a malformed candidate makes the message no verdict, and fences are defined. The limitation that had waived this is removed.

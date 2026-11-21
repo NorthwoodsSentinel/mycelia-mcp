@@ -23,7 +23,9 @@
 // registry integrity check) fails at once and `main()` returns 1 on that line
 // instead of starting the Inspector. `verify-skills-cli` runs with a stub
 // `claude` alone on PATH (below), so it takes its local-CLI branch and never
-// reaches the network. Run via `npm run test:scripts`.
+// reaches the network. The three pr-flow helpers (`gate-run`, `handoff-check`,
+// `audit-verdict`) are each run into their own refusal of a bad argument, which
+// starts no other program. Run via `npm run test:scripts`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -144,6 +146,32 @@ const GUARDS = [
         line: /^smoke — FAIL {2}the registry's integrity for @modelcontextprotocol\/inspector@/m,
       },
     ],
+  },
+  // The pr-flow helpers (NOR-610) are not gate stages, but each ends its run
+  // with one deciding line, and a helper that is never "main" would exit 0
+  // having printed nothing: the silent pass these scripts exist to remove.
+  // Each case is the script's own refusal, which starts no git, npm or gh.
+  {
+    script: "gate-run.mjs",
+    args: ["--no-such-flag"],
+    terminal: [
+      { status: 2, line: /^NO PASS: gate-run takes no arguments \(got: / },
+    ],
+  },
+  {
+    script: "handoff-check.mjs",
+    args: ["0"],
+    terminal: [
+      {
+        status: 2,
+        line: /^NO HAND-OFF: the PR number must be a positive integer/m,
+      },
+    ],
+  },
+  {
+    script: "audit-verdict.mjs",
+    args: [],
+    terminal: [{ status: 2, line: /^audit verdict: no verdict$/m }],
   },
 ];
 
