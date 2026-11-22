@@ -57,10 +57,16 @@
 # reports UNVERIFIED and carries on (AGENTS.md: a conditional guard, not an
 # invariant).
 #
-# What it cannot see (docs/DESIGN-nor-673-sweeps.md, section 5): GitHub's
-# dependency graph for this repository holds its direct dependencies only, so
-# an advisory on a transitive package raises no alert, and no sweep of the
-# alerts can report it.
+# What the alerts cannot show, and what reports it instead: GitHub's dependency
+# graph for this repository holds its direct dependencies only (it does not
+# read `bun.lock`), so an advisory on a transitive package raises no alert.
+# The script therefore also asks GitHub's public advisory listing about every
+# version locked in `bun.lock` and files those the same way
+# (docs/DESIGN-nor-695-lockfile-advisories.md; the script's header, edit 15).
+# That added no line that runs to this file: no step, no permission and no
+# secret. The listing is read through `gh` on the host every other call here
+# goes to. Whether it accepts this job's token is shown by the first scheduled
+# run; if it did not, the run would be red with nothing written.
 #
 # What it needs that is not in this file, and is the owner's to create: the
 # labels `chore` and `dependabot`. The script files each issue with `factory`,
@@ -95,9 +101,11 @@ jobs:
     runs-on: ubuntu-latest
     # PROVISIONAL: no run of this workflow had been observed when this was
     # written, and the source declares no timeout on this job to take a value
-    # from. One run is an install, three listings (the setting, the alerts,
-    # the open issues), and for each bump a comment listing and up to two
-    # issue writes a second apart. 5 minutes is a hung-job guard, not a flake
+    # from. One run is an install, the setting, three listings (the open
+    # alerts, the dismissed alerts, the open issues), the advisory queries
+    # for the lock file (three today), and for each bump a comment listing
+    # and up to two issue writes a second apart. 5 minutes is a hung-job
+    # guard, not a flake
     # remedy; re-size it from this repository's scheduled runs, with the
     # range, as AGENTS.md requires (Test-gate timeouts).
     timeout-minutes: 5

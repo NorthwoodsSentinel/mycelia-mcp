@@ -33,6 +33,11 @@
 //     (addition A3), so the source's call sites stay as written and no test
 //     sleeps.
 //   - Cases written in this repo are under "Written in this repo", at the end.
+//   - The lock file check (the script's header, edit 15) has its cases last,
+//     under "The lock file check". They run `main` with its own default
+//     check; every case above them runs it with a check that found nothing
+//     (`NO_LOCK_FINDINGS`), so each keeps the meaning it had before the
+//     check existed. The fake answers the two listings the check reads.
 //
 // The source's reason for covering `main()` here, unchanged: a production
 // trigger is not a test (Copilot): everything that can go wrong in the
@@ -48,6 +53,7 @@ import {
   advisoryKey,
   parseClearedDate,
   ISSUE_LABELS,
+  LOCK_CLEARED_REASON,
   KNOWN_MANIFESTS,
   LOCKFILE,
   PLACEMENT_DOC,
@@ -74,12 +80,23 @@ import {
   parseMarker,
   toSemverRange,
 } from "./dependabot-alerts.mjs";
+import { semverRange } from "./lib/lock-advisories.mjs";
 import { pacedWrites, WRITE_PAUSE_MS } from "./lib/paced-writes.mjs";
+
+/** A lock file check that found nothing, with both controls good. */
+const NO_LOCK_FINDINGS = () => ({ records: [], staleControls: [] });
 
 /**
  * The script's `main`, with a writer whose pause does nothing: the pacing is
  * real in a run and has its own cases below, and no other test should wait a
  * second for each write after the first.
+ *
+ * In this repo (the script's header, edit 15): and with a lock file check
+ * that found nothing. Every case that calls this is a case about the ALERT
+ * path, most of them the source's, and each keeps the meaning it had before
+ * the lock file check existed. The cases for the check itself are under "The
+ * lock file check", at the end; they call `sweepMain` with its own default,
+ * as a run does.
  */
 const main = (repo, spawn, today) =>
   sweepMain(
@@ -87,6 +104,7 @@ const main = (repo, spawn, today) =>
     spawn,
     today,
     pacedWrites(() => {}),
+    NO_LOCK_FINDINGS,
   );
 
 /** Shaped like a real `GET /repos/{o}/{r}/dependabot/alerts` entry. */
@@ -595,6 +613,70 @@ test("buildNewAdvisoryComment lists only the newly-seen advisories", () => {
 /** The account the REST endpoints name as the author of the sweep's writes. */
 const BOT = { login: "github-actions[bot]", type: "Bot" };
 
+/** Shaped like a real `GET /advisories` entry (the lock file check reads these). */
+function advisory({
+  ghsa,
+  pkg = "fast-uri",
+  range = ">= 3.0.0, < 3.1.6",
+  fixed = "3.1.6",
+  severity = "high",
+  cve = null,
+  withdrawn = null,
+  type = "reviewed",
+  vulnerabilities,
+}) {
+  return {
+    ghsa_id: ghsa,
+    cve_id: cve,
+    html_url: `https://example.invalid/not-used/${ghsa}`,
+    summary: `${pkg} is bad`,
+    type,
+    severity,
+    withdrawn_at: withdrawn,
+    vulnerabilities: vulnerabilities ?? [
+      {
+        package: { ecosystem: "npm", name: pkg },
+        vulnerable_version_range: range,
+        first_patched_version: fixed,
+        vulnerable_functions: [],
+      },
+    ],
+  };
+}
+
+/**
+ * The two control advisories as the endpoint returned them on 2026-11-22,
+ * cut down to the fields read: each lists two ranges for its package, and
+ * the control version is in one of them.
+ */
+const CONTROL_ADVISORIES = [
+  advisory({
+    ghsa: "GHSA-xvch-5gv4-984h",
+    pkg: "minimist",
+    severity: "critical",
+    cve: "CVE-2021-44906",
+    vulnerabilities: [
+      {
+        package: { ecosystem: "npm", name: "minimist" },
+        vulnerable_version_range: ">= 1.0.0, < 1.2.6",
+        first_patched_version: "1.2.6",
+      },
+      {
+        package: { ecosystem: "npm", name: "minimist" },
+        vulnerable_version_range: "< 0.2.4",
+        first_patched_version: "0.2.4",
+      },
+    ],
+  }),
+  advisory({
+    ghsa: "GHSA-35jh-r3h4-6jhm",
+    pkg: "lodash",
+    cve: "CVE-2021-23337",
+    range: "< 4.17.21",
+    fixed: "4.17.21",
+  }),
+];
+
 /** A fixture issue as the REST listing returns one this sweep filed. */
 const asSweepIssue = (issue) => ({
   user: BOT,
@@ -629,6 +711,17 @@ function fakeSpawn({
   comments = [],
   // A raw comment-listing response, overriding `comments`.
   commentsResponse,
+  // The lock file check (the script's header, edit 15). The dismissed-alert
+  // listing, as pages; and a raw answer that overrides it.
+  dismissedPages = [[]],
+  dismissedResponse,
+  // What the advisory listing returns besides the two control advisories,
+  // which every answer holds unless `advisoryAnswer` or `advisoryResponse`
+  // says otherwise: `advisoryAnswer(path)` returns one query's whole answer
+  // as a list, `advisoryResponse` is a raw answer to every query.
+  advisories = [],
+  advisoryAnswer,
+  advisoryResponse,
   // The exit status of each kind of issue write.
   createStatus = 0,
   editStatus = 0,
@@ -654,6 +747,20 @@ function fakeSpawn({
             stdout: "",
             stderr: securityFixesStderr,
           };
+    }
+    // Before the open listing: both paths hold "dependabot/alerts".
+    if (joined.includes("dependabot/alerts?state=dismissed,auto_dismissed")) {
+      if (dismissedResponse)
+        return { stdout: "", stderr: "", ...dismissedResponse };
+      return ok(JSON.stringify(dismissedPages));
+    }
+    if (args[0] === "api" && args.at(-1).startsWith("advisories?")) {
+      if (advisoryResponse)
+        return { stdout: "", stderr: "", ...advisoryResponse };
+      const list = advisoryAnswer
+        ? advisoryAnswer(args.at(-1))
+        : [...CONTROL_ADVISORIES, ...advisories];
+      return ok(JSON.stringify([list]));
     }
     if (joined.includes("dependabot/alerts")) {
       if (alertResponse) return { stdout: "", stderr: "", ...alertResponse };
@@ -2990,4 +3097,711 @@ test("an issue entry whose pull_request field is neither absent nor an object st
       /an entry whose pull_request field is not an object/,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// The lock file check (the script's header, edit 15; the design note
+// docs/DESIGN-nor-695-lockfile-advisories.md). Written in this repo. Every
+// case here calls `sweepMain` with its own default check, as a run does, and
+// a fake `gh` that answers the advisory listing and the dismissed-alert
+// listing. The module's own cases are in scripts/lib/lock-advisories.test.mjs.
+// ---------------------------------------------------------------------------
+
+/** The sweep as a run makes it, lock file check included, with no waiting. */
+const sweep = (spawn, today = "2026-11-22") =>
+  sweepMain(
+    "o/r",
+    spawn,
+    today,
+    pacedWrites(() => {}),
+  );
+
+const LOCK_A = "GHSA-aaaa-aaaa-aaaa";
+const LOCK_B = "GHSA-bbbb-bbbb-bbbb";
+
+/** The `--title` and `--body` of one recorded `gh issue` call. */
+const titleOf = (call) => call.args[call.args.indexOf("--title") + 1];
+const bodyOf = (call) => call.args[call.args.indexOf("--body") + 1];
+
+/** The failure of a run whose lock file check could not be completed. */
+const LOCK_CHECK_FAILED =
+  /^dependabot-alerts: the lock file check could not be completed \(.*\) — no issue was filed, commented on or cleared this run$/s;
+
+/**
+ * The open issue a run files for `LOCK_A` on `fast-uri`, found in the lock
+ * file: taken from a real run, so it is byte for byte what the sweep writes.
+ */
+function lockIssue(extra = {}) {
+  const spawn = fakeSpawn({ advisories: [advisory({ ghsa: LOCK_A })] });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  const create = ghCall(spawn, "create");
+  return { number: 51, title: titleOf(create), body: bodyOf(create), ...extra };
+}
+
+test("lock file check: an advisory on a package no alert covers files exactly one issue, marked bun.lock", () => {
+  // The design note's evidence row E3.
+  const spawn = fakeSpawn({
+    advisories: [
+      advisory({ ghsa: LOCK_A, cve: "CVE-2026-12345", severity: "medium" }),
+    ],
+  });
+  const log = inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+
+  assert.equal(issueWrites(spawn).length, 1, "one write: the create");
+  const create = ghCall(spawn, "create");
+  assert.equal(
+    titleOf(create),
+    "chore(deps): bump `fast-uri` to `3.1.6` in `bun.lock` (1 advisory)",
+  );
+  assert.deepEqual(
+    create.args.filter((_, i) => create.args[i - 1] === "--label"),
+    ISSUE_LABELS,
+  );
+  const body = bodyOf(create);
+  assert.deepEqual(parseMarker(body), {
+    package: "fast-uri",
+    manifestPath: "bun.lock",
+    fixedIn: "3.1.6",
+    ghsas: [LOCK_A],
+  });
+  const lines = body.split("\n");
+  assert.equal(
+    lines[1],
+    "Filed automatically: 1 advisory in GitHub's advisory database applies to a version locked in `bun.lock`. Dependabot opens no security-update PRs on this repo; the fix is written by hand against `main`.",
+  );
+  assert.ok(lines.includes("| Manifest | `bun.lock` |"));
+  assert.ok(lines.includes("| Scope | not determined |"));
+  assert.ok(lines.includes("| Highest severity | medium |"));
+  assert.ok(
+    lines.includes(
+      `| [${LOCK_A}](https://github.com/advisories/${LOCK_A}) | CVE-2026-12345 | medium | >= 3.0.0, < 3.1.6 | fast-uri is bad |`,
+    ),
+    "the advisory's row, linked to its advisory page",
+  );
+  assert.ok(!body.includes("example.invalid"), "no URL from the answer");
+  assert.ok(body.includes("**Add an [`overrides`]"), "a transitive copy");
+  assert.ok(lines.includes("| `node_modules/fast-uri` | `3.1.5` |"));
+  assert.ok(
+    body.includes("reported by GitHub's advisory database."),
+    "the note names where the advisory came from",
+  );
+  assert.ok(
+    log.some((l) =>
+      l.includes(
+        "checked the 1 entries of bun.lock against GitHub's advisory database — 1 advisory range applies to a locked version, 1 of them not covered by a Dependabot alert",
+      ),
+    ),
+    `expected the check's own line, got: ${log.join(" | ")}`,
+  );
+});
+
+test("lock file check: it asks about the locked pairs in ONE affects parameter, with both controls", () => {
+  const spawn = fakeSpawn();
+  inTempRepo(
+    { "bun.lock": lockOf({ "fast-uri": "3.1.5", "@scope/pkg": "1.0.0" }) },
+    () => captureLog(() => sweep(spawn)),
+  );
+  const asks = spawn.calls.filter((c) =>
+    c.args.at(-1).startsWith("advisories?"),
+  );
+  assert.equal(asks.length, 1);
+  assert.deepEqual(asks[0].args.slice(0, 3), ["api", "--paginate", "--slurp"]);
+  const path = asks[0].args[3];
+  assert.equal(path.split("affects=").length - 1, 1, "exactly one affects=");
+  assert.deepEqual(
+    new URLSearchParams(path.slice(path.indexOf("?") + 1)).getAll("affects"),
+    ["minimist@0.0.8,lodash@4.17.20,@scope/pkg@1.0.0,fast-uri@3.1.5"],
+  );
+  assert.ok(!path.includes("@"), "every @ is percent-encoded");
+});
+
+test("lock file check: a second run with the same answers writes nothing", () => {
+  const spawn = fakeSpawn({
+    advisories: [advisory({ ghsa: LOCK_A })],
+    issues: [lockIssue()],
+  });
+  const log = inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.equal(issueWrites(spawn).length, 0);
+  assert.ok(log.some((l) => l.includes("#51 is up to date for fast-uri")));
+});
+
+test("lock file check: a clean lock file files nothing and says what it checked", () => {
+  const spawn = fakeSpawn();
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.6") }, () =>
+    captureLog(() => sweep(spawn)),
+  );
+  assert.equal(issueWrites(spawn).length, 0);
+  assert.ok(
+    log.some((l) => l.includes("0 advisory ranges apply to a locked version")),
+  );
+  assert.ok(log.some((l) => l.includes("no open alerts")));
+});
+
+test("lock file check: a withdrawn advisory files nothing", () => {
+  const spawn = fakeSpawn({
+    advisories: [advisory({ ghsa: LOCK_A, withdrawn: "2026-11-18T15:38:56Z" })],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.equal(issueWrites(spawn).length, 0);
+});
+
+test("lock file check: an advisory that leaves the answer clears its issue, once, and never closes it", () => {
+  const filed = lockIssue();
+  const spawn = fakeSpawn({ issues: [filed] });
+  const log = inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+
+  const writes = issueWrites(spawn);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].args[1], "edit");
+  assert.ok(!writes[0].args.includes("--state"), "an edit of the body only");
+  const cleared = bodyOf(writes[0]);
+  assert.deepEqual(parseMarker(cleared), parseMarker(filed.body));
+  assert.ok(
+    cleared.includes(
+      `**No longer applicable on \`main\` as of 2026-11-22** — ${LOCK_CLEARED_REASON}.`,
+    ),
+  );
+  assert.ok(log.some((l) => l.includes("cleared #51")));
+
+  // The cleared issue stays open and is seen again the next day: no edit.
+  const next = fakeSpawn({ issues: [{ ...filed, body: cleared }] });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(next, "2026-11-23")));
+  assert.equal(issueWrites(next).length, 0);
+});
+
+test("lock file check: a second advisory for an open lock-file issue is a comment, then the marker", () => {
+  const spawn = fakeSpawn({
+    advisories: [advisory({ ghsa: LOCK_A }), advisory({ ghsa: LOCK_B })],
+    issues: [lockIssue()],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  const writes = issueWrites(spawn);
+  assert.deepEqual(
+    writes.map((c) => c.args[1]),
+    ["comment", "edit"],
+  );
+  const comment = bodyOf(writes[0]);
+  assert.deepEqual(parseCommentMarker(comment), [LOCK_B]);
+  assert.ok(
+    comment.includes("1 new advisory for `fast-uri`"),
+    "an advisory found against bun.lock is not called Dependabot's",
+  );
+  assert.deepEqual(parseMarker(bodyOf(writes[1])).ghsas, [LOCK_A, LOCK_B]);
+});
+
+test("lock file check: an advisory an OPEN alert already names is left to the alert: one issue", () => {
+  // The design note's evidence row E4: both paths report the same advisory
+  // on the same package, and the run files one issue, the alert's.
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: LOCK_A })]],
+    advisories: [advisory({ ghsa: LOCK_A })],
+  });
+  const log = inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  const creates = ghCalls(spawn, "create");
+  assert.equal(creates.length, 1);
+  assert.equal(parseMarker(bodyOf(creates[0])).manifestPath, "package.json");
+  assert.equal(issueWrites(spawn).length, 1);
+  assert.ok(
+    log.some(
+      (l) =>
+        l.includes(`${LOCK_A} applies to fast-uri in bun.lock`) &&
+        l.includes("left to the alert"),
+    ),
+  );
+});
+
+for (const state of ["dismissed", "auto_dismissed"]) {
+  test(`lock file check: an advisory a person ${state === "dismissed" ? "dismissed" : "or a rule auto-dismissed"} as an alert is not filed again from the lock file`, () => {
+    const spawn = fakeSpawn({
+      dismissedPages: [[alert({ ghsa: LOCK_A, state })]],
+      advisories: [advisory({ ghsa: LOCK_A })],
+    });
+    inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+    assert.equal(issueWrites(spawn).length, 0);
+  });
+}
+
+test("lock file check: a dismissed alert covers its own advisory and package only", () => {
+  const spawn = fakeSpawn({
+    dismissedPages: [
+      [
+        alert({ ghsa: LOCK_B, state: "dismissed" }),
+        alert({ ghsa: LOCK_A, pkg: "some-other-package", state: "dismissed" }),
+        // Not npm: an advisory id shared with another ecosystem covers nothing.
+        alert({ ghsa: LOCK_A, state: "dismissed", ecosystem: "pip" }),
+      ],
+    ],
+    advisories: [advisory({ ghsa: LOCK_A })],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.equal(ghCalls(spawn, "create").length, 1);
+});
+
+test("lock file check: alerts GitHub calls fixed are never asked for, so one cannot hide a nested copy", () => {
+  const spawn = fakeSpawn({ advisories: [advisory({ ghsa: LOCK_A })] });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  const alertReads = spawn.calls
+    .map((c) => c.args.at(-1))
+    .filter((arg) => arg.includes("dependabot/alerts"));
+  assert.deepEqual(alertReads, [
+    "repos/o/r/dependabot/alerts?state=open&per_page=100",
+    "repos/o/r/dependabot/alerts?state=dismissed,auto_dismissed&per_page=100",
+  ]);
+  assert.equal(ghCalls(spawn, "create").length, 1);
+});
+
+test("lock file check: another advisory on a package with an open alert is its own bump, on its own manifest", () => {
+  // The rule is per advisory, not per package: dropping every lock-file
+  // record for a package that has any alert would hide exactly the copy the
+  // alert cannot see. So two advisories, one alerted and one not, are two
+  // issues, even when both name the same patched version.
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" })]],
+    advisories: [advisory({ ghsa: LOCK_B })],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.deepEqual(
+    ghCalls(spawn, "create")
+      .map((c) => parseMarker(bodyOf(c)))
+      .map((m) => `${m.manifestPath} ${m.ghsas.join(",")}`)
+      .sort(),
+    [`bun.lock ${LOCK_B}`, "package.json GHSA-a"],
+  );
+});
+
+test("lock file check: an advisory with no patched version is logged by name and files nothing", () => {
+  const spawn = fakeSpawn({
+    advisories: [advisory({ ghsa: LOCK_A, fixed: null })],
+  });
+  const log = inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.equal(issueWrites(spawn).length, 0);
+  assert.ok(
+    log.some(
+      (l) =>
+        l.includes(`${LOCK_A} applies to fast-uri in bun.lock`) &&
+        l.includes("has no patched version yet"),
+    ),
+  );
+});
+
+test("lock file check: an open advisory that LOSES its patched version does not clear its issue", () => {
+  const spawn = fakeSpawn({
+    advisories: [advisory({ ghsa: LOCK_A, fixed: null })],
+    issues: [lockIssue()],
+  });
+  const log = inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.equal(issueWrites(spawn).length, 0);
+  assert.ok(log.some((l) => l.includes("#51 left as is")));
+});
+
+test("lock file check: an issue with its marker that the automation did not write is not taken for its own", () => {
+  // Addition A1 holds for this marker as for the alert path's.
+  const forged = {
+    ...lockIssue(),
+    user: { login: "someone-else", type: "User" },
+  };
+  const spawn = fakeSpawn({
+    advisories: [advisory({ ghsa: LOCK_A })],
+    issues: [forged],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweep(spawn)));
+  assert.deepEqual(
+    issueWrites(spawn).map((c) => c.args[1]),
+    ["create"],
+    "the real issue is filed, and the forged one is not edited",
+  );
+});
+
+test("lock file check: every read is made before the first write, and writes are paced", () => {
+  const pauses = [];
+  const spawn = fakeSpawn({
+    advisories: [
+      advisory({ ghsa: LOCK_A }),
+      advisory({
+        ghsa: LOCK_B,
+        pkg: "browserslist",
+        range: "<= 4.28.6",
+        fixed: "4.28.7",
+      }),
+    ],
+  });
+  inTempRepo(
+    { "bun.lock": lockOf({ "fast-uri": "3.1.5", browserslist: "4.28.2" }) },
+    () =>
+      captureLog(() =>
+        sweepMain(
+          "o/r",
+          spawn,
+          "2026-11-22",
+          pacedWrites((ms) => pauses.push(ms)),
+        ),
+      ),
+  );
+  const kinds = spawn.calls.map((c) =>
+    c.args[0] === "issue" ? `write:${c.args[1]}` : "read",
+  );
+  assert.deepEqual(kinds, [
+    "read", // the setting
+    "read", // the open alerts
+    "read", // the dismissed alerts
+    "read", // the advisory listing
+    "read", // the open issues
+    "write:create",
+    "write:create",
+  ]);
+  assert.deepEqual(pauses, [WRITE_PAUSE_MS], "one pause, between the two");
+});
+
+/**
+ * A run that must fail at the lock file check and write NOTHING, though it
+ * holds an open alert that would file an issue and an open lock-file issue
+ * whose advisory is not in the (failed) answer and would be cleared.
+ */
+function assertLockCheckStopsTheRun(options, files, message) {
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" })]],
+    issues: [lockIssue()],
+    ...options,
+  });
+  inTempRepo(files, () => {
+    captureLog(() => {
+      assert.throws(
+        () => sweep(spawn),
+        (error) => {
+          assert.match(error.message, LOCK_CHECK_FAILED);
+          assert.match(error.message, message);
+          return true;
+        },
+      );
+    });
+  });
+  assert.equal(
+    issueWrites(spawn).length,
+    0,
+    "no issue is filed, edited, commented on or cleared",
+  );
+  assert.equal(
+    spawn.calls.some((c) => c.args.at(-1).includes("/issues?")),
+    false,
+    "the run stopped before it listed its issues",
+  );
+}
+
+// The design note's evidence row E5, through the whole sweep.
+for (const [what, options, message] of [
+  [
+    "the advisory listing cannot be reached",
+    {
+      advisoryResponse: {
+        status: 1,
+        stdout: "[]",
+        stderr: "dial tcp: refused",
+      },
+    },
+    /dial tcp: refused/,
+  ],
+  [
+    "the advisory listing is rate-limited",
+    {
+      advisoryResponse: {
+        status: 1,
+        stderr: "gh: API rate limit exceeded (HTTP 403)",
+      },
+    },
+    /rate limit exceeded/,
+  ],
+  [
+    "the job's token is refused by the advisory listing",
+    {
+      advisoryResponse: {
+        status: 1,
+        stderr: "gh: Resource not accessible by integration (HTTP 403)",
+      },
+    },
+    /Resource not accessible by integration/,
+  ],
+  [
+    "the advisory listing answers with no pages",
+    { advisoryResponse: { status: 0, stdout: "[]" } },
+    /no pages/,
+  ],
+  [
+    "the advisory listing prints nothing",
+    { advisoryResponse: { status: 0, stdout: "" } },
+    /JSON/,
+  ],
+  [
+    "the advisory listing prints something that is not JSON",
+    { advisoryResponse: { status: 0, stdout: "<html>maintenance</html>" } },
+    /JSON/,
+  ],
+  [
+    "the advisory listing's answer is EMPTY, so no control advisory came back",
+    { advisoryAnswer: () => [] },
+    /does not hold the control advisories/,
+  ],
+  [
+    "one control advisory is missing from the answer",
+    { advisoryAnswer: () => [CONTROL_ADVISORIES[1]] },
+    /does not hold the control advisory for minimist@0\.0\.8/,
+  ],
+  [
+    "both control advisories are withdrawn",
+    {
+      advisoryAnswer: () =>
+        CONTROL_ADVISORIES.map((a) => ({
+          ...a,
+          withdrawn_at: "2027-01-01T00:00:00Z",
+        })),
+    },
+    /nothing vouches for the answer/,
+  ],
+  [
+    "an advisory entry is misshapen",
+    {
+      advisoryAnswer: () => [
+        ...CONTROL_ADVISORIES,
+        { ...advisory({ ghsa: LOCK_A }), withdrawn_at: undefined },
+      ],
+    },
+    /without a withdrawn_at/,
+  ],
+  [
+    "an advisory's range is one semver cannot read",
+    {
+      advisoryAnswer: () => [
+        ...CONTROL_ADVISORIES,
+        advisory({ ghsa: LOCK_A, range: "three point one" }),
+      ],
+    },
+    /not semver/,
+  ],
+  [
+    "an advisory's patched version is not a version",
+    {
+      advisoryAnswer: () => [
+        ...CONTROL_ADVISORIES,
+        advisory({ ghsa: LOCK_A, fixed: "soon" }),
+      ],
+    },
+    /not semver/,
+  ],
+  [
+    "the dismissed-alert listing fails",
+    { dismissedResponse: { status: 1, stderr: "HTTP 502" } },
+    /HTTP 502/,
+  ],
+  [
+    "the dismissed-alert listing answers with no pages",
+    { dismissedResponse: { status: 0, stdout: "[]" } },
+    /no pages/,
+  ],
+  [
+    "the dismissed-alert listing holds an entry that is not an object",
+    { dismissedPages: [["GHSA-a"]] },
+    /not a dismissed alert stating its package, ecosystem and advisory/,
+  ],
+  [
+    "the dismissed-alert listing holds an alert in another state",
+    { dismissedPages: [[alert({ ghsa: "GHSA-a", state: "open" })]] },
+    /not a dismissed alert stating its package, ecosystem and advisory/,
+  ],
+  [
+    "a dismissed alert does not name its advisory",
+    {
+      dismissedPages: [
+        [
+          {
+            ...alert({ ghsa: "GHSA-a", state: "dismissed" }),
+            security_advisory: {},
+          },
+        ],
+      ],
+    },
+    /not a dismissed alert stating its package, ecosystem and advisory/,
+  ],
+]) {
+  test(`lock file check: nothing is written when ${what}`, () => {
+    assertLockCheckStopsTheRun(options, VULNERABLE, message);
+  });
+}
+
+for (const [what, files, message] of [
+  ["bun.lock is missing", {}, /ENOENT/],
+  [
+    "bun.lock will not parse",
+    { "bun.lock": "{ truncated…" },
+    /could not parse/,
+  ],
+  [
+    "bun.lock is a version of the format the reader does not know",
+    { "bun.lock": { ...lockWith("fast-uri", "3.1.5"), lockfileVersion: 2 } },
+    /lockfileVersion/,
+  ],
+  [
+    "a lock entry is not a registry version",
+    {
+      "bun.lock": lockOf({
+        "fast-uri": "3.1.5",
+        "local-thing": "file:../local-thing",
+      }),
+    },
+    /not a registry version this check can ask about/,
+  ],
+  [
+    "a lock entry's name is not one that can be asked about",
+    { "bun.lock": lockOf({ "fast-uri": "3.1.5", "Has-Capital": "1.0.0" }) },
+    /not an npm package name this check can ask about/,
+  ],
+]) {
+  test(`lock file check: nothing is written, and the advisory listing is not asked, when ${what}`, () => {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" })]],
+      issues: [lockIssue()],
+    });
+    inTempRepo(files, () => {
+      captureLog(() => {
+        assert.throws(
+          () => sweep(spawn),
+          (error) => {
+            assert.match(error.message, LOCK_CHECK_FAILED);
+            assert.match(error.message, message);
+            return true;
+          },
+        );
+      });
+    });
+    assert.equal(issueWrites(spawn).length, 0);
+    assert.equal(
+      spawn.calls.some((c) => c.args.at(-1).startsWith("advisories?")),
+      false,
+    );
+  });
+}
+
+test("lock file check: ONE stale control leaves the run working, and the run then fails naming it", () => {
+  const spawn = fakeSpawn({
+    advisoryAnswer: () => [
+      { ...CONTROL_ADVISORIES[0], withdrawn_at: "2027-01-01T00:00:00Z" },
+      CONTROL_ADVISORIES[1],
+      advisory({ ghsa: LOCK_A }),
+    ],
+  });
+  const log = inTempRepo(VULNERABLE, () =>
+    captureLogOfFailedRun(
+      () => sweep(spawn),
+      /the lock file check's control minimist@0\.0\.8 \(GHSA-xvch-5gv4-984h\) no longer vouches for an answer.*replace the stale one in scripts\/lib\/lock-advisories\.mjs/s,
+    ),
+  );
+  assert.deepEqual(
+    issueWrites(spawn).map((c) => c.args[1]),
+    ["create"],
+    "the other control vouched for the answer, so the issue is filed",
+  );
+  assert.ok(log.some((l) => l.includes("filed")));
+});
+
+test("lock file check: a stale control and a bump that could not be checked are both named", () => {
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a", manifest: "gone/lock.json" })]],
+    advisoryAnswer: () => [
+      CONTROL_ADVISORIES[0],
+      { ...CONTROL_ADVISORIES[1], withdrawn_at: "2027-01-01T00:00:00Z" },
+    ],
+  });
+  inTempRepo(VULNERABLE, () =>
+    captureLog(() =>
+      assert.throws(
+        () => sweep(spawn),
+        (error) => {
+          assert.match(error.message, UNCHECKED);
+          assert.match(
+            error.message,
+            /control lodash@4\.17\.20 \(GHSA-35jh-r3h4-6jhm\) no longer vouches/,
+          );
+          return true;
+        },
+      ),
+    ),
+  );
+});
+
+test("lock file check: its range normaliser and the sweep's give the same answers", () => {
+  // `lib/lock-advisories.mjs` repeats `toSemverRange`, because this script
+  // imports that file. This holds the two together.
+  for (const range of [
+    ">= 3.1.3, < 3.1.6",
+    "< 0.2.4",
+    ">= 1.0, < 2.0 || >= 3.0, < 3.5",
+    "  <= 4.17.21 ,",
+    " , ",
+    "",
+  ]) {
+    assert.equal(semverRange(range), toSemverRange(range), range);
+  }
+});
+
+test("lock file check: two ranges of one advisory with one patched version are one issue that names the advisory once", () => {
+  // The pull request's audit, round 1. A hoisted copy in one range and a
+  // nested copy in another, both patched by the same version: one bump.
+  const lock = {
+    lockfileVersion: 1,
+    workspaces: { "": { name: "fixture", dependencies: {} } },
+    packages: {
+      ajv: ["ajv@8.17.1", "", {}, "sha512-fixture"],
+      "fast-uri": ["fast-uri@3.1.5", "", {}, "sha512-fixture"],
+      "ajv/fast-uri": ["fast-uri@2.4.0", "", {}, "sha512-fixture"],
+    },
+  };
+  const twoRanges = advisory({
+    ghsa: LOCK_A,
+    vulnerabilities: [
+      {
+        package: { ecosystem: "npm", name: "fast-uri" },
+        vulnerable_version_range: ">= 3.0.0, < 3.1.6",
+        first_patched_version: "3.1.6",
+      },
+      {
+        package: { ecosystem: "npm", name: "fast-uri" },
+        vulnerable_version_range: "< 2.5.0",
+        first_patched_version: "3.1.6",
+      },
+    ],
+  });
+  const spawn = fakeSpawn({ advisories: [twoRanges] });
+  inTempRepo({ "bun.lock": lock }, () => captureLog(() => sweep(spawn)));
+
+  const writes = issueWrites(spawn);
+  assert.equal(writes.length, 1);
+  assert.equal(
+    titleOf(writes[0]),
+    "chore(deps): bump `fast-uri` to `3.1.6` in `bun.lock` (1 advisory)",
+  );
+  const body = bodyOf(writes[0]);
+  assert.deepEqual(parseMarker(body).ghsas, [LOCK_A]);
+  const lines = body.split("\n");
+  assert.ok(
+    lines.includes(
+      `| [${LOCK_A}](https://github.com/advisories/${LOCK_A}) | — | high | < 2.5.0 \\|\\| >= 3.0.0, < 3.1.6 | fast-uri is bad |`,
+    ),
+    "one row, with both ranges",
+  );
+  assert.ok(lines.includes("| `node_modules/fast-uri` | `3.1.5` |"));
+  assert.ok(
+    lines.includes("| `node_modules/ajv/node_modules/fast-uri` | `2.4.0` |"),
+    "the nested copy is named too",
+  );
+
+  // And the next run, with the ranges the other way round, writes nothing.
+  const again = fakeSpawn({
+    advisories: [
+      {
+        ...twoRanges,
+        vulnerabilities: [...twoRanges.vulnerabilities].reverse(),
+      },
+    ],
+    issues: [{ number: 52, title: titleOf(writes[0]), body }],
+  });
+  inTempRepo({ "bun.lock": lock }, () => captureLog(() => sweep(again)));
+  assert.equal(issueWrites(again).length, 0);
 });
