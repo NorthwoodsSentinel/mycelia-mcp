@@ -111,13 +111,17 @@
 //      answer ("not npm", "every version", "no patch yet"). The package, the
 //      advisory id and the patched version must also be free of the
 //      characters the markers are split on, or the next run could not read
-//      its own marker back. No alert (one advisory's one range on one
-//      package in one manifest) may be listed twice. The issue listing and
-//      each comment listing: no pages at all throws (`ghPaginatedList`), and
-//      so does an entry that is not an object or that does not state its
-//      author's login and account type; an issue entry must also state its
-//      labels as a list of named labels.
-//      An issue this sweep takes for its own must have a positive integer
+//      its own marker back. For an npm alert the range must be one `semver`
+//      can read and the patched version a semver version: `semver` answers
+//      "does not satisfy" for a range it cannot read, which would clear a
+//      live alert's issue as "out of range". No alert (one advisory's one
+//      range on one package in one manifest) may be listed twice. The issue
+//      listing and each comment listing: no pages at all throws
+//      (`ghPaginatedList`), and so does an entry that is not an object or
+//      that does not state its author's login and account type; an issue
+//      entry must also state its labels as a list of named labels, and its
+//      `pull_request` field must be absent or an object. An issue this
+//      sweep takes for its own must have a positive integer
 //      `number`, the one field of the listing that reaches `gh` as an
 //      argument of its own, and must state its body, where the marker is
 //      read; a comment of its own must state its body too. Six of these
@@ -125,7 +129,8 @@
 //      (`scripts/dependabot-alerts-attack.test.mjs`, cases 1 to 4, 7 and
 //      8), and the checks on an alert's ecosystem, range, patched version
 //      and marker characters and on an issue's labels answer its audit of
-//      the pull request, round 1. NOT checked, and rendered as the listing
+//      the pull request, round 1, and the semver check its round 2. NOT
+//      checked, and rendered as the listing
 //      gives them: an alert's severity, summary, scope and URL. None of them
 //      decides anything; each is text in an issue a person reads. The
 //      setting, the alert listing and the issue
@@ -1035,6 +1040,29 @@ function openAlerts(repo, spawn) {
         `dependabot-alerts: the alert listing held an entry that is not an open alert stating its package, ecosystem, manifest, advisory, vulnerable range and patched version in a usable form — ${untouched}`,
       );
     }
+    // For an npm alert the range and the patched version are semver, and are
+    // used as semver: the range decides whether an installed copy is exposed,
+    // and the patched version is what the issue tells a person to move to. A
+    // range `semver` cannot read is not "no version matches": asked whether a
+    // version satisfies it, `semver` answers false, and an open issue for a
+    // live alert would be cleared as "out of range" (the pull request's audit,
+    // round 2). A range that is only separators normalises to nothing, which
+    // `semver` reads as "every version". An alert of another ecosystem is not
+    // held to this: its ranges are not semver, and it is only logged.
+    if (alert.dependency.package.ecosystem === SUPPORTED_ECOSYSTEM) {
+      const range = toSemverRange(
+        alert.security_vulnerability.vulnerable_version_range,
+      );
+      if (
+        range === "" ||
+        semver.validRange(range) === null ||
+        (patched !== null && semver.valid(patched.identifier) === null)
+      ) {
+        throw new Error(
+          `dependabot-alerts: the alert listing held an npm alert (${alert.security_advisory.ghsa_id} on ${alert.dependency.package.name}) whose vulnerable range or patched version is not semver — ${untouched}`,
+        );
+      }
+    }
     // One advisory's one vulnerable range, on one package in one manifest, is
     // one alert. Listed twice, the listing repeated an entry or contradicts
     // itself (attack case 8: the same alert twice, with two patched versions,
@@ -1173,7 +1201,8 @@ function authorOf(entry, path) {
  * (skipped as "not mine", it would let a malformed answer stand for "no issue
  * of mine is open", and a duplicate would be filed); an entry that does not
  * state its author in full (`authorOf`), or its labels as a list of named
- * labels; an own issue whose `number` is not a
+ * labels, or whose `pull_request` field is neither absent nor an object (the
+ * three things the filter below reads); an own issue whose `number` is not a
  * positive integer (that field is handed to `gh issue edit` and
  * `gh issue comment` as an argument of its own, and is put into an API path,
  * so nothing `gh` could read as an option, and nothing but a number, may get
@@ -1205,6 +1234,15 @@ function openDependabotIssues(repo, spawn) {
     ) {
       throw new Error(
         `unexpected response from ${path}: an entry that does not state its labels as a list of named labels`,
+      );
+    }
+    // The third thing the filter below reads. The endpoint marks a pull
+    // request with an object under `pull_request` and leaves the field off an
+    // issue; any other value is neither, and would drop an issue of the
+    // sweep's own as if it were a pull request.
+    if (issue.pull_request !== undefined && !isRecord(issue.pull_request)) {
+      throw new Error(
+        `unexpected response from ${path}: an entry whose pull_request field is not an object`,
       );
     }
   }

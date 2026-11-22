@@ -2911,3 +2911,83 @@ test("an issue entry that does not state its labels as a list of named labels st
     );
   }
 });
+
+// --- edit 13, as the pull request's audit left it (round 2) --------------------
+
+test("an npm alert whose range or patched version is not semver stops the run before anything is touched", () => {
+  // `semver.satisfies` answers false for a range it cannot read. Taken as
+  // "out of range", that cleared the open issue of a live alert.
+  for (const fields of [
+    { range: "garbage" },
+    { range: ">= three" },
+    { range: ", ," },
+    { range: " " },
+    { fixed: "not-semver" },
+    { fixed: "3.1" },
+    { fixed: "v3.1.6.0" },
+  ]) {
+    assertListingFailureTouchesNothing(
+      {
+        status: 0,
+        stdout: JSON.stringify([[alert({ ghsa: "GHSA-a", ...fields })]]),
+      },
+      /an npm alert \(GHSA-a on fast-uri\) whose vulnerable range or patched version is not semver/,
+    );
+  }
+});
+
+test("the ranges GitHub writes for npm are read, and an alert of another ecosystem is not held to semver", () => {
+  for (const range of [
+    ">= 3.1.3, < 3.1.6",
+    "<= 4.28.6",
+    "< 3.1.6",
+    "= 3.1.5",
+    ">= 1.0.0, < 2.0.0 || >= 3.0.0, < 3.5.0",
+  ]) {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a", range })]],
+    });
+    inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+    assert.ok(ghCall(spawn, "create"), `${range} applies to 3.1.5`);
+  }
+
+  // A pip range and version are not semver. That alert is logged for a
+  // person, as before, and does not stop the run or the npm bump beside it.
+  const spawn = fakeSpawn({
+    alertPages: [
+      [
+        alert({
+          ghsa: "GHSA-pip",
+          pkg: "requests",
+          manifest: "requirements.txt",
+          ecosystem: "pip",
+          range: ">= 2.0, < 2.31.post1",
+          fixed: "2.31.post1",
+        }),
+        alert({ ghsa: "GHSA-a" }),
+      ],
+    ],
+  });
+  const log = inTempRepo(VULNERABLE, () =>
+    captureLog(() => main("o/r", spawn)),
+  );
+  assert.equal(ghCalls(spawn, "create").length, 1);
+  assert.ok(log.some((l) => l.includes("raise it by hand: GHSA-pip")));
+});
+
+test("an issue entry whose pull_request field is neither absent nor an object stops the run", () => {
+  // Anything truthy there drops the entry as a pull request, so a short or
+  // odd value would hide the sweep's own issue and its bump would be filed
+  // again.
+  for (const value of [true, "yes", 1, null, []]) {
+    assertIssueListingStopsTheRun(
+      {
+        status: 0,
+        stdout: JSON.stringify([
+          [{ ...asSweepIssue(filedIssue()), pull_request: value }],
+        ]),
+      },
+      /an entry whose pull_request field is not an object/,
+    );
+  }
+});
