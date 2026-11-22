@@ -213,3 +213,9 @@ Copied from the Inspector at `d330df96` (blob ids read with
 | `.github/workflows/main.yml` gate line | Inspector `main.yml` step "Validate the skills with the authoritative CLI (#2163)" | — | A stage of the one gate line (the CI line is `local:gate` minus `local:dco`), not a separate step. |
 | `scripts/verify-skills.mjs` `checkWiring`, test | Servers: the source's two `verify:skills:cli` links (`local:gate`, CI) | — | Restored beside this repo's links. Added here: `checkEvalNotWired`, which fails if an npm script reachable from `validate`, `local:gate` or a CI step, or a CI step's `run:`, names `skills:eval` or `skill-eval.mjs`. It does not follow a script that starts the eval through another file. |
 | `scripts/entry-points.test.mjs` | Written here | — | Two cases for `verify-skills-cli.mjs` through the symlinked checkout, with a stub `claude` on PATH that reports the pin: one where the validator passes, one where it rejects. |
+
+## The overview page
+
+`docs/ai-software-factory.md` (NOR-690) was written here, not copied. Its section order follows the servers' page of the same name (`modelcontextprotocol/servers`, commit `ec089ce1`, `docs/ai-software-factory.md`, 247 lines, blob `85e46296abfffb672cbc747183f4e6aa1e3ad653`), read in part: its headings, its opening, "The headline change" and "What makes it work". The other sections of that page were not read for this one, and the Inspector's own page was not read.
+
+Every sentence about this repository was taken from its tree at `007915d` or from GitHub on 2026-11-22, with the command beside each count. Two sections have no counterpart in the source: "What is not built yet" and "The adoption, step by step". Where the source's point does not hold here, the page says so in place: no sweeps on `main`, no model in CI, no release procedure, and no measured trigger rates on `main`.
