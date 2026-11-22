@@ -22,7 +22,7 @@ This table lists every part of the source's factory that is not working on `main
 | A model's analysis of an upstream release, run in CI | Not built. No model runs in CI here. | None of its own; the same decision, NOR-674 |
 | A skills eval on `main` | No whole-suite run has been made on `main`. One was made on an open pull request's branch (pull request 14). The eval spends metered model calls, and no standing approval for that spend exists here: each run is the owner's to approve. | NOR-614 for that pull request; none for a standing approval |
 | A skills eval on a non-Claude agent | The Copilot runner is ported and has never been run, so whether the skills fire for another vendor's agent is unmeasured. | None of its own |
-| The sign-off check as a required check | The `DCO` workflow runs on every pull request. No ruleset makes it required (`gh api repos/NorthwoodsSentinel/mycelia-mcp/rulesets --jq length` gives `0`). A ruleset is the owner's setting. | None of its own |
+| The gate and the sign-off check as required checks | Both workflows run on every pull request: `validate` in `main.yml` and `DCO` in `dco.yml`. Neither is a required check, because the repository has no ruleset (`gh api repos/NorthwoodsSentinel/mycelia-mcp/rulesets --jq length` gives `0`). So GitHub would let a pull request merge with either one red or missing; what prevents that today is the owner reading the hand-off before merging. A ruleset is the owner's setting. | None of its own |
 
 One thing in the step table is a recorded departure and not a gap: the `CLAUDE.md` pointer stays. The step table says why.
 
@@ -113,7 +113,7 @@ A ticket's life:
 3. **Approved.** Moving a ticket to `Todo` is the approval. The owner does it for new work. An agent may do it for a follow-up it filed inside work the owner already approved, and says which.
 4. **Worked.** The ticket moves to `In Progress` from `Todo` only, and a branch `nor-<N>-<slug>` is cut from `origin/main` into a new git worktree.
 5. **Sent for review.** The gate passes on a clean, committed tree, every commit is signed off, and a pull request opens against `main` with `Closes NOR-<N>` as the first line of its body. The ticket moves to `In Review`.
-6. **Reviewed.** A review loop runs with every finding answered on the pull request. It stops on the first clean round, or on a round holding only findings declined as out of scope.
+6. **Reviewed.** A review loop runs with every finding answered on the pull request. It stops on the first clean round, on a round holding only findings declined as out of scope, or after two rounds in a row that end without an audit (a timeout or no verdict).
 7. **Handed to the owner, who merges.** The agent reports, read against one head commit, what the owner is merging, and gives the merge as one command that refuses a head that moved.
 8. **Closed by hand, after the merge.** `Done` means the work shipped, and two things earn it: the ticket's pull request is merged with its merge commit on `origin/main`, or the ticket is a parent whose last sub-issue closed. A duplicate or a won't-fix shipped nothing, so it goes to `Duplicate` or `Canceled`, never `Done`.
 
