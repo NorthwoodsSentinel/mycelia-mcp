@@ -851,7 +851,16 @@ test("a Copilot run bounds availability, not just approval", () => {
   assert.throws(() => agentArgs("cursor", 1), /unknown agent `cursor`/);
 });
 
-test("setting sources are opt-in and only narrow which settings load (NOR-614)", () => {
+test("setting sources are opt-in and only narrow which settings load (NOR-614)", (t) => {
+  // The fourth parameter defaults to the environment, and an explicit
+  // `undefined` takes that default. So the variable is removed for this test
+  // and put back after it; otherwise a run of this file with the option set
+  // would fail here.
+  const saved = process.env.SKILL_EVAL_SETTING_SOURCES;
+  delete process.env.SKILL_EVAL_SETTING_SOURCES;
+  t.after(() => {
+    if (saved !== undefined) process.env.SKILL_EVAL_SETTING_SOURCES = saved;
+  });
   // Unset or empty: the Claude run is the Inspector's, unchanged.
   const base = agentArgs("claude", 1, null, undefined);
   assert.ok(!base.includes("--setting-sources"));
