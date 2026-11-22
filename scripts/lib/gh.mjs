@@ -1,11 +1,14 @@
 // In this repo: copied from modelcontextprotocol/inspector at commit d330df96,
 // scripts/lib/gh.mjs, by copy then edit. Its `#N` references, and the script
 // families its first paragraph names, are the source repo's. Here the callers
-// are `scripts/handoff-check.mjs` and its tests (NOR-610). Edits: `OWNER` and
-// `REPO` name this repository; `COPILOT_REVIEWER_LOGIN`, `ghGraphql` and
-// `ghPaginatedList` are removed, because nothing here uses them; and
-// `ghPaginatedObject` is added, for the endpoints that answer with one object
-// per page and a `total_count`. Record: PROVENANCE.md.
+// are `scripts/handoff-check.mjs` and its tests (NOR-610), and the monthly
+// dependency sweep, `scripts/dependency-refresh.mjs` (NOR-684). Edits: `OWNER`
+// and `REPO` name this repository; `COPILOT_REVIEWER_LOGIN` and `ghGraphql`
+// are removed, because nothing here uses them; and `ghPaginatedObject` is
+// added, for the endpoints that answer with one object per page and a
+// `total_count`. `ghPaginatedList` was removed with the other two while
+// nothing used it and is back, as the source has it, now that the sweep lists
+// its own open issues through it. Record: PROVENANCE.md.
 //
 // Shared `gh` invocation helpers for the maintainer-workflow scripts (#2558)
 // — the pr:*, board:*, advisory:* and action:* helpers. Those scripts replace
@@ -60,6 +63,21 @@ export function ghJson(spawn, args) {
     );
   }
   return JSON.parse(result.stdout);
+}
+
+/**
+ * Fetch a paginated REST list endpoint completely.
+ *
+ * ⚠️ `--slurp` is load-bearing (same note as `dependabot-alerts.mjs`): without
+ * it `gh api --paginate` concatenates one JSON array per page into invalid
+ * JSON. With it the output is an array of pages, flattened here.
+ */
+export function ghPaginatedList(spawn, path) {
+  const pages = ghJson(spawn, ["api", "--paginate", "--slurp", path]);
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+    throw new Error(`unexpected non-list response from ${path}`);
+  }
+  return pages.flat();
 }
 
 /**

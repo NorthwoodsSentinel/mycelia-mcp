@@ -1,7 +1,8 @@
 // In this repo: copied from modelcontextprotocol/inspector at commit d330df96,
-// scripts/lib/gh.test.mjs, by copy then edit. Edits: the tests of the three
+// scripts/lib/gh.test.mjs, by copy then edit. Edits: the tests of the two
 // exports removed from the library are removed with them, and the tests of
-// `ghPaginatedObject` are added (NOR-610). Record: PROVENANCE.md.
+// `ghPaginatedObject` are added (NOR-610). The two tests of `ghPaginatedList`
+// are the source's, back with the function (NOR-684). Record: PROVENANCE.md.
 //
 // Tests for scripts/lib/gh.mjs (#2558) — the shared `gh` invocation helpers
 // under the maintainer-workflow scripts. Run via `npm run test:scripts`.
@@ -11,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   gh,
   ghJson,
+  ghPaginatedList,
   ghPaginatedObject,
   requirePositiveInt,
   GH_MAX_BUFFER,
@@ -54,6 +56,32 @@ test("ghJson parses stdout and throws on non-zero exit with stderr", () => {
 
   const bad = spawnReturning({ status: 1, stdout: "", stderr: "auth broke" });
   assert.throws(() => ghJson(bad, ["api", "x"]), /auth broke/);
+});
+
+test("ghPaginatedList slurps and flattens pages", () => {
+  const spawn = spawnReturning({
+    status: 0,
+    stdout: "[[1,2],[3]]",
+    stderr: "",
+  });
+  assert.deepEqual(ghPaginatedList(spawn, "repos/o/r/things"), [1, 2, 3]);
+  assert.deepEqual(spawn.calls[0].args, [
+    "api",
+    "--paginate",
+    "--slurp",
+    "repos/o/r/things",
+  ]);
+});
+
+test("ghPaginatedList rejects a non-list response", () => {
+  const notList = spawnReturning({ status: 0, stdout: '{"x":1}', stderr: "" });
+  assert.throws(() => ghPaginatedList(notList, "p"), /non-list/);
+  const mixedPages = spawnReturning({
+    status: 0,
+    stdout: "[[1],2]",
+    stderr: "",
+  });
+  assert.throws(() => ghPaginatedList(mixedPages, "p"), /non-list/);
 });
 
 /** A slurped two-page answer of an object-per-page endpoint. */
