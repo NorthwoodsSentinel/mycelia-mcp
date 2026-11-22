@@ -851,6 +851,31 @@ test("a Copilot run bounds availability, not just approval", () => {
   assert.throws(() => agentArgs("cursor", 1), /unknown agent `cursor`/);
 });
 
+test("the setting sources come from the environment when the caller passes none (NOR-614)", (t) => {
+  // This is the path a real run takes: `runPrompt` calls the argument builder
+  // without a fourth argument, so the value is whatever the variable holds.
+  const saved = process.env.SKILL_EVAL_SETTING_SOURCES;
+  t.after(() => {
+    if (saved === undefined) delete process.env.SKILL_EVAL_SETTING_SOURCES;
+    else process.env.SKILL_EVAL_SETTING_SOURCES = saved;
+  });
+  delete process.env.SKILL_EVAL_SETTING_SOURCES;
+  const unset = agentArgs("claude", 1);
+  assert.ok(!unset.includes("--setting-sources"));
+  process.env.SKILL_EVAL_SETTING_SOURCES = "project,local";
+  const fromEnv = agentArgs("claude", 1);
+  assert.deepEqual(fromEnv.slice(0, unset.length), unset);
+  assert.deepEqual(fromEnv.slice(unset.length), [
+    "--setting-sources",
+    "project,local",
+  ]);
+  // A resume id in the third position, as `runPrompt` passes, changes nothing.
+  assert.deepEqual(agentArgs("claude", 1, "some-session"), fromEnv);
+  // A bad value in the environment is refused, not passed on.
+  process.env.SKILL_EVAL_SETTING_SOURCES = "local";
+  assert.throws(() => agentArgs("claude", 1), /project/);
+});
+
 test("setting sources are opt-in and only narrow which settings load (NOR-614)", (t) => {
   // The fourth parameter defaults to the environment, and an explicit
   // `undefined` takes that default. So the variable is removed for this test
