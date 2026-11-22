@@ -1,6 +1,6 @@
 # DESIGN: NOR-695: the daily sweep also checks the lock file
 
-Status: design only. No script, test or workflow file is changed by the commit that brings this note. It goes to the review model before any code is written (section 10).
+Status: design only. No script, test or workflow file is changed by the commits that bring this note. It is reviewed by the review model before any code is written (section 10).
 Parent: NOR-673, whose design note (`docs/DESIGN-nor-673-sweeps.md`) recorded what this closes as its first accepted limitation and referred it to the owner. The owner was asked "Should the daily sweep also read mycelia-mcp's lock file?" and answered yes on 2026-11-22.
 Target: a branch cut at `3eda5c9`, this repository's `main` when this was written.
 
@@ -195,7 +195,8 @@ It runs **inside the existing daily job and inside the existing script**: one jo
 - **A package that moves from "not declared" to "declared" while still in range** gets a new issue from its Dependabot alert, and its lock-file issue is rewritten to the cleared form: one live issue, one cleared.
 - **The query split is sized from two measurements**, 7,501 encoded characters accepted and 10,901 refused. 4,000 is a budget below the first, not a known limit.
 - That the job token is accepted by the advisory endpoint is INFERRED until the first run. Nothing here was run on Linux, on Node 22 or with the runner's `gh`.
-- The job's timeout stays provisional (NOR-686). Nothing reports a sweep that stopped running. Both are the parent design's.
+- **The job's timeout stays the provisional 5 minutes** until it is re-sized from scheduled runs (NOR-686), as the parent design left it. `AGENTS.md` asks for a value sized from observed runs, and there is none to observe: the workflow had no run of any kind on the design day (Measured: `gh run list --workflow dependabot-alerts.yml` gave an empty list), and a run of the changed job cannot be observed before the change is on `main`. What this addition adds to a run was measured where it could be, on the design machine: 2.2 seconds for the three advisory reads together and 0.44 seconds for the listing of dismissed alerts (an empty one); each issue it files adds one write and a one-second pause. How long a write takes on the runner was not measured. So the addition's reads come to about three seconds, and the first run, with three issues to file, adds three writes and two pauses to a job whose other steps are a checkout, two tool set-ups and an install. A run the timeout did stop between two writes would be the case the sweep's write order is already built for ("comment first, then the marker"): the next run reads the issues and comments again before it writes anything. **The re-sizing under NOR-686 has to be made from runs that include this addition.**
+- Nothing reports a sweep that stopped running. That is the parent design's too.
 
 **Not read.** GitHub's pages were taken through a page-summarising fetch, not from the raw pages. The source's two sweep test files were not re-read for this note. Which `gh` version the runner image carries is UNKNOWN.
 
@@ -226,4 +227,7 @@ Each would be an addition beyond what the security reason needs. One line each.
 
 ## 10. Design review
 
-Not yet run. Each round's verdict and findings, with what was done about each, are recorded here.
+By the review model, before any code. Each round's verdict and findings are recorded here with what was done about each. A finding is the reviewer's report until it is reproduced.
+
+- **Round d1 (`2928433`): fail, 1 finding.** The round returned a review. It said "The approach can work" and "The advisory-query architecture is workable", called candidate A "the best of the seven evaluated choices", called candidate F "correctly rejected" for its `contents: write`, and reported no way for untrusted text to reach `gh` as an option, a file, a placeholder or a path, no failed read ending clean, and no second issue from the two paths. The files to be written were marked not reviewed, because they do not exist yet.
+  1. MEDIUM, the job's 5-minute timeout is provisional, while `AGENTS.md` requires a value sized from observed runs, and the addition gives the job more to do; a run stopped by the timeout would be a false failure and could stop between two writes: **answered, not fixed** (section 7, the timeout item, rewritten for this). It is the parent design's finding, raised there in both of its rounds and answered there the same way: no run of the workflow exists to size from (re-measured for this note: an empty run list), and none of the changed job can exist before the change is merged. What could be measured is now stated: the addition's reads took about three seconds, and each issue adds a write and a one-second pause. A run stopped between writes is what the existing write order already allows for. Nothing in the finding is a security point or shows the design would not work. The re-sizing stays with NOR-686, which must use runs that include this addition.
