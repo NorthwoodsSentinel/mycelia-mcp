@@ -302,7 +302,7 @@ reporting enabled.
 ## Skill validator and skill eval
 
 Copied from the Inspector at `d330df96` (blob ids read with
-`git rev-parse d330df96:<path>`). `skills:eval` is run by hand only.
+`git rev-parse d330df96:<path>`). `skills:eval` is run by hand only. Its spend was each run's to be approved until 2026-11-22, when the owner approved it as standing; `AGENTS.md`, "Maintaining the skills", rule 3, says so (NOR-694).
 
 | This repo | Source (Inspector) | Git blob id | Edits |
 | --- | --- | --- | --- |
