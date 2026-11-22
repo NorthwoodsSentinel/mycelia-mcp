@@ -16,7 +16,7 @@
     "expect": "security-advisory"
   },
   {
-    "prompt": "When is it safe to make a privately reported vulnerability public, and who makes that call here?",
+    "prompt": "The fix for an accepted advisory has been reviewed in its private fork and the owner says they are ready to merge and publish. What are the steps from here, in order?",
     "expect": "security-advisory"
   },
   {

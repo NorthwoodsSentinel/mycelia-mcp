@@ -4,7 +4,7 @@ This document is the overview of how work gets done in this repository: the rule
 
 The model was adapted from the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)'s, by way of the method the [MCP reference servers](https://github.com/modelcontextprotocol/servers) used to adopt it. This page takes its section order from the servers' document of the same name (`modelcontextprotocol/servers`, commit `ec089ce1`). What was taken, adapted or left behind, file by file and with the source commit, is [`PROVENANCE.md`](../PROVENANCE.md). The adoption was tracked in Linear under NOR-535.
 
-Every count of what is in this repository, its history or its GitHub settings was taken on 2026-11-22 at `main` `007915d`, and the command that produced it is printed with it. A number that only restates a rule or counts items listed on this page (the four public acts, the three scripts of the PR flow) has no command, because the list is beside it. The ones that use `gh` read this repository on GitHub; the rest can be re-run in a checkout. A count that could not be taken is not here. Values that are configuration and not counts, such as the coverage bar, are stated from the files that set them. Ticket states were read in Linear on the same day and cannot be re-read from a checkout.
+Every count of what is in this repository, its history or its GitHub settings was taken on 2026-11-22 at `main` `3eda5c9`, and the command that produced it is printed with it. A number that only restates a rule or counts items listed on this page (the four public acts, the three scripts of the PR flow) has no command, because the list is beside it. The ones that use `gh` read this repository on GitHub; the rest can be re-run in a checkout. A count that could not be taken is not here. Values that are configuration and not counts, such as the coverage bar, are stated from the files that set them. Ticket states were read in Linear on the same day and cannot be re-read from a checkout.
 
 ## What is not built yet
 
@@ -12,15 +12,15 @@ This table lists every part of the source's factory that is not working on `main
 
 | Part | State on 2026-11-22 | Ticket |
 | --- | --- | --- |
-| The triage procedure (`issue-triage`) and its priority rubric | Not on `main`. Pull request 15 is open; one review point, that a score comment is recognized by its marker alone, is carried there as a known limitation. Until it lands, `AGENTS.md` says no rubric exists and an agent sets no Priority. | NOR-672; the known limitation is recorded on NOR-688 |
-| The CodeQL workflow | Not on `main`. Pull request 16 is open. | NOR-683 |
-| The monthly dependency sweep | Not on `main`. Pull request 17 is open. | NOR-684; a known weakness in its release lookup is NOR-689 |
-| The daily Dependabot-alert sweep | Not started. | NOR-685 |
-| Timeouts for those three workflows | They will be provisional until the first scheduled runs can be measured. | NOR-686 |
-| The labels the two sweeps file under (`chore`, `dependabot`) | Neither exists in this repository. Creating a label is the owner's act, and a sweep cannot file until both exist. | None of its own; recorded on NOR-673 |
-| The upstream watch (an issue per upstream release this repository is behind) | Not built, and no design exists for this repository. | None of its own; it waits on a design decision tracked as NOR-674 |
-| A model's analysis of an upstream release, run in CI | Not built. No model runs in CI here. | None of its own; the same decision, NOR-674 |
-| A skills eval on `main` | No whole-suite run has been made on `main`. One was made on an open pull request's branch (pull request 14). The eval spends metered model calls, and no standing approval for that spend exists here: each run is the owner's to approve. | NOR-614 for that pull request; none for a standing approval |
+| The triage procedure, in use | The `issue-triage` skill and its priority rubric are on `main`. No triage run has been made with it, so no ticket carries a score from it. One review point is carried as a known limitation: a score comment is recognized by its marker alone. | NOR-688 |
+| A first scheduled run of the CodeQL workflow and of the two sweeps | All three workflows are on `main`. None has run on its schedule or by hand (`gh run list -R NorthwoodsSentinel/mycelia-mcp --limit 200 --json event --jq '[.[] \| select(.event=="schedule" or .event=="workflow_dispatch")] \| length'` gives `0`), so neither sweep has filed an issue yet. CodeQL has run on pull requests and on pushes to `main`. | None of its own |
+| The monthly sweep's release lookup | It trusts each page of results it is given: no check on the shape, and no way to see a list cut short. | NOR-689 |
+| The daily sweep: two points its review left open | A refusal at the setting lookup that is not about authorization reads as UNVERIFIED, and display-only alert fields are not checked. | NOR-692 |
+| Job timeouts, in all five workflows | Every one is still its first, provisional value: each workflow file carries a note that no run had been observed when the value was written (`grep -c -i -F -e "PROVISIONAL" -e "Not yet observed" .github/workflows/*.yml` gives `1` for each of the five). `AGENTS.md` asks for a size taken from observed runs. Runs now exist to measure the gate, the sign-off check and CodeQL; the two sweeps have none yet. | NOR-686 for CodeQL and the two sweeps; none of its own for the gate and the sign-off check |
+| Advisories on transitive dependencies | GitHub's dependency graph holds only this repository's direct dependencies, so an advisory on a transitive package raises no alert and neither sweep reports it. `AGENTS.md` says so. | None of its own |
+| The upstream watch (an issue per upstream release this repository is behind) | Not built, and no design exists for this repository. Left out of the first version by the owner's decision of 2026-11-22. | None of its own; the decision is recorded on NOR-674 |
+| A model's analysis of an upstream release, run in CI | Not built. No model runs in CI here. The same decision. | None of its own; NOR-674 |
+| A skills eval on `main` | No whole-suite run has been made on `main`. Two were made on pull requests' branches (pull requests 14 and 15), and their figures are in those pull requests. Pull request 14, which adds an option those runs used, is open. The spend has the owner's standing approval (2026-11-22, `AGENTS.md`), so what is missing is the run itself. | NOR-614 for pull request 14; none of its own for a run on `main` |
 | A skills eval on a non-Claude agent | The Copilot runner is ported and has never been run, so whether the skills fire for another vendor's agent is unmeasured. | None of its own |
 | The gate and the sign-off check as required checks | Both workflows run on every pull request: `validate` in `main.yml` and `DCO` in `dco.yml`. Neither is a required check, because the repository has no ruleset (`gh api repos/NorthwoodsSentinel/mycelia-mcp/rulesets --jq length` gives `0`). So GitHub would let a pull request merge with either one red or missing; what prevents that today is the owner reading the hand-off before merging. A ruleset is the owner's setting. | None of its own |
 
@@ -36,15 +36,15 @@ The adoption was planned as numbered steps in six waves. The plan is kept outsid
 | S2 | The skills harness: `verify:skills:cli`, `skills:eval` on Claude and on a non-Claude agent, `docs/skill-authoring.md` | Partial | Pull request 5 (`02fc02c`, NOR-559). Both scripts and the guide are present. No eval has run on `main`, and none on a non-Claude agent anywhere. |
 | S5 | `issue-create` and `board-ops` for Linear | Done | Pull request 6 (`681d79d`, NOR-602). |
 | S6 | `pr-flow` | Done | Pull request 8 (`4c121d3`, NOR-604). Three of its steps became tested scripts in pull request 12 (`007915d`, NOR-610). |
-| S7 | `issue-triage` | Missing | No `.claude/skills/issue-triage/` on `main`. NOR-672. |
+| S7 | `issue-triage` | Built, never used | Pull request 15 (`3eda5c9`, NOR-672). No triage run has been made with it. |
 | S8 | The contribution model: issues, not pull requests | Done | Pull request 7 (`76e6379`, NOR-605): `CONTRIBUTING.md`, the two issue forms and `SECURITY.md`. |
 | S9 | `security-advisory` | Done | Pull request 9 (`ccbab72`, NOR-611). |
 | S10 | The CI and pre-push gate guards, `docs/quality-gate.md`, the `pre-push-gate` skill | Done | Pull request 11 (`7c53bba`, NOR-615). The source's gate lease was judged not applicable; the reason is in `docs/DESIGN-nor-615-gates.md`. |
 | S11 | `project-structure`, `local-dev`, `testing` | Done | Pull request 10 (`bc3f1b1`, NOR-613). |
 | S12 | A release as a credential-free build with a receipt | Not applicable | The plan scopes it to a repository that deploys. This one has no build step and no release procedure; see "Releases" below. |
-| S13 | The scheduled workflows; the hardened upstream watch job; this page | Partial | No scheduled workflow is on `main` (`ls .github/workflows` prints `dco.yml` and `main.yml`). The pieces are NOR-683, NOR-684 and NOR-685. The watch job has no ticket here. This page is NOR-690. |
+| S13 | The scheduled workflows; the hardened upstream watch job; this page | Partial | The CodeQL workflow is pull request 16 (`2b75fd4`, NOR-683), the monthly sweep pull request 17 (`c678a1b`, NOR-684), the daily sweep pull request 19 (`5aff2ee`, NOR-685). None has run on a schedule yet. The upstream watch job is not built and is left out of the first version. This page is pull request 18 (`a472e60`, NOR-690), brought up to date under NOR-693. |
 
-How the table was produced. A step's pull request and merge commit: `gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json number,body,mergeCommit | jq -r '.[] | "\(.number) \(.mergeCommit.oid[0:7]) \((.body // "") | split("\n")[0])"'`, read for the step's ticket number. Pull request 3 refers to its ticket with `Refs NOR-381` and predates the closing-line rule. Whether a file exists: `ls` on the path in a checkout of `main` `007915d`.
+How the table was produced. A step's pull request and merge commit: `gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json number,body,mergeCommit | jq -r '.[] | "\(.number) \(.mergeCommit.oid[0:7]) \((.body // "") | split("\n")[0])"'`, read for the step's ticket number. Pull request 3 refers to its ticket with `Refs NOR-381` and predates the closing-line rule. Whether a file exists: `ls` on the path in a checkout of `main` `3eda5c9`.
 
 ## The headline change
 
@@ -58,12 +58,12 @@ How the table was produced. A step's pull request and merge commit: `gh pr list 
 
 | What | Count | Command |
 | --- | --- | --- |
-| Pull requests merged into `main`, 2026-10-31 to 2026-11-21 | 12 | `gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json number \| jq length` |
-| Of those, with `Closes NOR-<n>` as the first line of the body | 10 | `gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json body \| jq '[.[] \| select((.body // "") \| split("\n")[0] \| test("^Closes NOR-[0-9]+"))] \| length'` |
-| Commits on `main`, merges excluded | 49 | `git rev-list --no-merges --count origin/main` |
-| Of those, carrying a `Co-Authored-By` trailer | 34 | `git log --no-merges --format='%H %(trailers:key=Co-Authored-By,valueonly,separator=%x2C)' origin/main \| awk 'NF>1' \| wc -l` |
-| Of those, carrying a `Signed-off-by` trailer | 43 | `git log --no-merges --format='%H %(trailers:key=Signed-off-by,valueonly,separator=%x2C)' origin/main \| awk 'NF>1' \| wc -l` |
-| CI runs on `main`, by workflow and result | `CI success: 11`, `DCO success: 11` | `gh run list -R NorthwoodsSentinel/mycelia-mcp --branch main --limit 100 --json workflowName,conclusion --jq 'group_by(.workflowName+" "+.conclusion) \| map("\(.[0].workflowName) \(.[0].conclusion): \(length)") \| .[]'` |
+| Pull requests merged into `main`, 2026-10-31 to 2026-11-22 | 17 | `gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json number \| jq length` |
+| Of those, with `Closes NOR-<n>` as the first line of the body | 15 | `gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json body \| jq '[.[] \| select((.body // "") \| split("\n")[0] \| test("^Closes NOR-[0-9]+"))] \| length'` |
+| Commits on `main`, merges excluded | 82 | `git rev-list --no-merges --count origin/main` |
+| Of those, carrying a `Co-Authored-By` trailer | 52 | `git log --no-merges --format='%H %(trailers:key=Co-Authored-By,valueonly,separator=%x2C)' origin/main \| awk 'NF>1' \| wc -l` |
+| Of those, carrying a `Signed-off-by` trailer | 76 | `git log --no-merges --format='%H %(trailers:key=Signed-off-by,valueonly,separator=%x2C)' origin/main \| awk 'NF>1' \| wc -l` |
+| CI runs on `main`, by workflow and result | `CI success: 16`, `CodeQL success: 4`, `DCO success: 16` | `gh run list -R NorthwoodsSentinel/mycelia-mcp --branch main --limit 100 --json workflowName,conclusion --jq 'group_by(.workflowName+" "+.conclusion) \| map("\(.[0].workflowName) \(.[0].conclusion): \(length)") \| .[]'` |
 
 The date range in the first row is the earliest and the latest `mergedAt` in that listing (`gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 500 --json mergedAt | jq -r '[.[].mergedAt] | min, max'`).
 
@@ -80,7 +80,7 @@ That shape is what the adaptation was about. The Inspector is several clients ov
 | Layer | Where | Holds | Loaded |
 | --- | --- | --- | --- |
 | **Rules** | [`AGENTS.md`](../AGENTS.md) | The conventions a reviewer cites against a diff: branches, dependencies, testing, the gate, what only the owner does | In full, at the start of every session |
-| **Procedures** | [`.claude/skills/*/SKILL.md`](../.claude/skills) (nine, by `ls .claude/skills \| wc -l`) | Multi-step recipes with live commands: filing a ticket, board moves, the PR flow | On demand, when a description matches or by `/<name>` |
+| **Procedures** | [`.claude/skills/*/SKILL.md`](../.claude/skills) (ten, by `ls .claude/skills \| wc -l`) | Multi-step recipes with live commands: filing a ticket, board moves, the PR flow | On demand, when a description matches or by `/<name>` |
 
 The split exists because the two fail differently. A skill loads conditionally and can drop out of a long session's context, so a rule that must never silently disappear lives in `AGENTS.md`. A recipe that can be re-read from disk whenever it is needed lives in a skill.
 
@@ -91,16 +91,17 @@ The split exists because the two fail differently. A skill loads conditionally a
 | `testing` | Where a test goes and which runner picks it up, the coverage gate |
 | `client-smoke` | Driving the server with the pinned Inspector CLI by hand, against a local fake of the Mycelia API |
 | `issue-create` | Filing a Linear issue: the duplicate check, the labels, the state, the read-back |
+| `issue-triage` | The two-pass sweep of untriaged tickets, the priority rubric and its score comment, the audit, and listing for the owner the outside GitHub issues no ticket covers |
 | `board-ops` | Linear state moves and their preconditions, closing as duplicate or canceled, labels |
 | `pr-flow` | A ticket to an open, reviewed pull request, the hand-off to the owner, the close-out |
 | `pre-push-gate` | Running the gate and reading a failed stage |
 | `security-advisory` | A privately reported vulnerability, and every act in it that is the owner's alone |
 
-All nine declare `disable-model-invocation: false`, so the model may fire any of them, and all nine carry committed eval cases (`ls .claude/skills/*/evals/evals.json | wc -l` gives `9`).
+All ten declare `disable-model-invocation: false`, so the model may fire any of them, and all ten carry committed eval cases (`ls .claude/skills/*/evals/evals.json | wc -l` gives `10`).
 
-Whether a skill fires when it should is meant to be measured, not assumed. `npm run skills:eval` runs the committed cases against real agent sessions and scores the hit rate. It spends model calls, so it is run by hand and never from the gate or CI, and each run is the owner's to approve. `verify:skills`, which is in the gate, parses every skill's frontmatter the way Claude Code does and keeps the listing inside its budget. [`skill-authoring.md`](./skill-authoring.md) is how a description gets tuned.
+Whether a skill fires when it should is meant to be measured, not assumed. `npm run skills:eval` runs the committed cases against real agent sessions and scores the hit rate. It spends model calls, so it is run by hand and never from the gate or CI; the owner approved that spend as standing on 2026-11-22. `verify:skills`, which is in the gate, parses every skill's frontmatter the way Claude Code does and keeps the listing inside its budget. [`skill-authoring.md`](./skill-authoring.md) is how a description gets tuned.
 
-On `main` that measurement has not been made: `PROVENANCE.md` records the `pre-push-gate` cases as "Trigger rates are unmeasured". One whole-suite run exists, on the branch of open pull request 14 and with the owner's approval; its figures are in that pull request and describe that branch, not `main`.
+On `main` that measurement has not been made: `PROVENANCE.md` records the `pre-push-gate` cases as "Trigger rates are unmeasured". Two whole-suite runs exist, each on a pull request's branch (pull requests 14 and 15) and each with the owner's approval; their figures are in those pull requests and describe those branches, not `main`.
 
 ## Issue-driven work, end to end
 
@@ -117,7 +118,7 @@ A ticket's life:
 7. **Handed to the owner, who merges.** The agent reports, read against one head commit, what the owner is merging, and gives the merge as one command that refuses a head that moved.
 8. **Closed by hand, after the merge.** `Done` means the work shipped, and two things earn it: the ticket's pull request is merged with its merge commit on `origin/main`, or the ticket is a parent whose last sub-issue closed. A duplicate or a won't-fix shipped nothing, so it goes to `Duplicate` or `Canceled`, never `Done`.
 
-Between filing and approval the source has triage: a pass that labels and scores every new ticket so the owner reviews an ordered queue. That is not on `main` here. Until it is, a ticket's Priority is the owner's to set or stays unset.
+Between filing and approval sits triage, the `issue-triage` skill: a pass over untriaged tickets that scores each one, so the owner reviews an ordered queue. A score orders the queue and approves nothing; moving a ticket to `Todo` stays the owner's. Priority comes from the skill's rubric, with the score recorded on the ticket, and a Priority the owner gave stands as given. The skill arrived on 2026-11-22 and no triage run has been made with it, so today's tickets carry no scores from it.
 
 A GitHub issue from outside is not yet a ticket. No issue has been opened on this repository (`gh issue list -R NorthwoodsSentinel/mycelia-mcp --state all --limit 100 --json number --jq length` gives `0`), so that path is written down and has not been used.
 
@@ -157,25 +158,35 @@ The smoke gates on one protocol era, 2025-11-25. It also tries the 2026-07-28 er
 
 ## Releases
 
-There is no release procedure in this repository. The server is run from a clone: `bun src/index.ts`, with no build step. No GitHub release exists (`gh release list -R NorthwoodsSentinel/mycelia-mcp --limit 5 | wc -l` gives `0`). `AGENTS.md` lists "publishing the package, or any release" among the owner's acts; nothing here automates one. No repository Actions secret is configured (`gh secret list -R NorthwoodsSentinel/mycelia-mcp --json name --jq length` gives `0`), so the only credential a workflow holds is the `GITHUB_TOKEN` GitHub issues to every run, and both workflows scope it to `contents: read` (`grep -A1 "^permissions:" .github/workflows/*.yml`).
+There is no release procedure in this repository. The server is run from a clone: `bun src/index.ts`, with no build step. No GitHub release exists (`gh release list -R NorthwoodsSentinel/mycelia-mcp --limit 5 | wc -l` gives `0`). `AGENTS.md` lists "publishing the package, or any release" among the owner's acts; nothing here automates one. No repository Actions secret is configured (`gh secret list -R NorthwoodsSentinel/mycelia-mcp --json name --jq length` gives `0`), so the only credential a workflow holds is the `GITHUB_TOKEN` GitHub issues to every run, Every workflow sets it to `contents: read` at the top (`grep -A1 "^permissions:" .github/workflows/*.yml`), and three jobs widen it for their own work (`grep -A4 "^    permissions:" .github/workflows/*.yml`): the monthly sweep's job adds `issues: write`, the daily sweep's job adds `issues: write` and `vulnerability-alerts: read`, and the CodeQL job adds `security-events: write`.
 
-## Scheduled automation: none on `main`
+## Scheduled automation: three workflows, none run on its schedule yet
 
-In the source, three scheduled sweeps file issues in place of Dependabot's pull requests: a monthly one for version updates, a daily one for security alerts, and a watch for upstream releases. `AGENTS.md` here carries those rules, marked "[No sweeps yet in this repo]", and that is still true: the only workflows on `main` are `main.yml` (the gate) and `dco.yml` (the sign-off check), and neither has a schedule (`grep -c cron .github/workflows/*.yml` gives `0` for each).
+In the source, three scheduled sweeps file issues in place of Dependabot's pull requests: a monthly one for version updates, a daily one for security alerts, and a watch for upstream releases. Two of the three are on `main` here, with the source's CodeQL workflow beside them. The schedules are read from the workflow files (`grep -n cron .github/workflows/*.yml`).
 
-What exists today is the setting the rules depend on, read from GitHub on 2026-11-22:
+| Workflow | Runs | Does |
+| --- | --- | --- |
+| `codeql.yml` | Saturdays at 16:23 UTC, and on every pull request and push to `main` | Scans the workflows and the JavaScript and TypeScript source, and uploads the results to the repository's code scanning |
+| `dependency-refresh.yml` | The 1st of every month at 06:23 UTC, or by hand | Files or edits one issue listing what is behind |
+| `dependabot-alerts.yml` | Daily at 06:17 UTC, or by hand | Reads the open Dependabot alerts and files or edits one issue per bump |
+
+Both sweeps file **GitHub issues**, as the source's do, and not Linear tickets: a sweep that filed in Linear would need a tracker credential in a public repository's secrets. An issue a sweep files carries the labels `factory`, `chore` and `dependabot`, and all three exist in this repository (`gh label list -R NorthwoodsSentinel/mycelia-mcp --limit 100 --json name --jq '[.[].name] | join(", ")'`). A sweep opens no pull request and closes no issue.
+
+**None of the three has run on its schedule, and neither sweep has run at all**, so no sweep has filed an issue yet. The count is in "What is not built yet". What this section describes for the two sweeps is code that has passed its tests and its review and has not yet met a real run.
+
+The settings the rules depend on, read from GitHub on 2026-11-22:
 
 - Dependabot alerts are on (`gh api repos/NorthwoodsSentinel/mycelia-mcp/vulnerability-alerts -i` answers `204`).
 - Dependabot security-update pull requests are off (`gh api repos/NorthwoodsSentinel/mycelia-mcp/automated-security-fixes` gives `"enabled":false`).
 - There is no `.github/dependabot.yml`, so no version-update pull requests are configured.
 
-So Dependabot opens no pull requests here, as the rule says, and nothing yet files the issues that are meant to replace them. An alert is visible only to someone who looks at the repository's security tab. The pieces that close that gap are listed under "What is not built yet".
+So Dependabot opens no pull requests here, as the rule says. Two limits are stated in `AGENTS.md`. The daily sweep's token cannot read the security-updates setting above, so each run will log UNVERIFIED instead of checking it. And GitHub's dependency graph holds only this repository's direct dependencies, so an advisory on a transitive package raises no alert and neither sweep reports it.
 
-The sweeps planned for this repository file GitHub issues, as the source's do, and not Linear tickets. A sweep that filed in Linear would need a tracker credential in a public repository's secrets.
+The third sweep, the upstream watch, is not built: `AGENTS.md` carries its rules, marked "[No sweeps yet in this repo]".
 
 ### No model runs in CI
 
-In the source, the upstream watch has a second half: a model reads the upstream release notes and writes an analysis comment. Nothing of that kind exists here, and no design for it exists for this repository. `AGENTS.md` carries the source's rules for such a job, and they bind the day one is added.
+In the source, the upstream watch has a second half: a model reads the upstream release notes and writes an analysis comment. Nothing of that kind exists here, no design for it exists for this repository, and the owner left it out of the first version on 2026-11-22. `AGENTS.md` carries the source's rules for such a job, and they bind the day one is added.
 
 ## Security reports: a separate, human-gated track
 
@@ -188,7 +199,7 @@ Inside the process it is tracked as a private `[SEC]` Linear ticket, never a Git
 1. **Every piece of work is a ticket with a recorded approval.** `Todo` means the owner signed off, and an agent starts only there.
 2. **The gate predicts CI**, because it runs every stage CI runs. The source also rules that a check added to one is added to the other in the same change; this repository's rules do not state that, so it is not claimed here.
 3. **Rules and procedures are built for their own failure modes.** Rules stay resident and survive a compacted context. Procedures are meant to stay reachable through descriptions whose firing is measured; on `main` that measurement has not been made.
-4. **Automation that could bypass review files issues instead.** That is the design. None of that automation is on `main` yet.
+4. **Automation that could bypass review files issues instead.** That is the design. The two sweeps that carry it are on `main` and have not yet run.
 5. **Everything public stays with the owner, with four named exceptions.** The list below is `AGENTS.md`'s, and it is a list, not a principle.
 6. **The reviewer is not the author's kind.** A model from another vendor reads the exact commit.
 

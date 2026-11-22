@@ -7,6 +7,8 @@
 // and is never wired into `validate`, `local:gate` or CI
 // (`scripts/verify-skills.mjs` `checkWiring` fails if it is). Isolation is
 // left to the caller, as in the source (see its note below).
+// A second edit (NOR-614): the opt-in `SKILL_EVAL_SETTING_SOURCES`, at
+// `settingSourcesArgs` below.
 // Record: PROVENANCE.md.
 //
 // Below this header the text is the source's own; a `#N` reference in it is
@@ -43,6 +45,7 @@
 //   npm run skills:eval -- testing test-servers  # several skills' cases
 //   RUNS=5 THRESHOLD=0.8 npm run skills:eval
 //   AGENT=copilot npm run skills:eval          # the same cases, driven through GitHub Copilot
+//   SKILL_EVAL_SETTING_SOURCES=project,local npm run skills:eval  # skip user hooks (OURS, NOR-614)
 //
 // Two agents, measured separately (#2397). Some maintainers work on this repo
 // with the GitHub Copilot CLI, which discovers project skills from
@@ -567,7 +570,12 @@ const COPILOT_DENIED_KINDS = ["shell", "write", "url"];
  * @param {number} maxTurns
  * @returns {string[]}
  */
-export function agentArgs(agent, maxTurns) {
+export function agentArgs(
+  agent,
+  maxTurns,
+  _resumeSessionId = null,
+  settingSources = process.env.SKILL_EVAL_SETTING_SOURCES,
+) {
   if (agent === "copilot") {
     return [
       // No `-p`: with none, the CLI reads the prompt from piped stdin, which
@@ -605,7 +613,40 @@ export function agentArgs(agent, maxTurns) {
     "--disallowedTools",
     DISALLOWED_TOOLS.join(","),
     "--strict-mcp-config",
+    ...settingSourcesArgs(settingSources),
   ];
+}
+
+/**
+ * OURS (NOR-614), not the Inspector's: an opt-in narrowing of which settings
+ * files each eval run loads. Unset, nothing is added and the run is the
+ * Inspector's exactly. Set to e.g. `project,local`, the user-level settings
+ * file is skipped, so the contributor's own hooks never fire inside an eval
+ * session. A full suite is hundreds of headless runs, and a user-level hook
+ * that does work on every prompt does that work in each of them. A value
+ * naming anything other than `user`, `project` or `local` throws rather than
+ * reaching the CLI, and so does one without `project`: the skills under
+ * measurement live in the project's `.claude/skills/`, so a run without that
+ * source would score every positive case as a miss.
+ *
+ * @param {string | undefined} value
+ * @returns {string[]}
+ */
+export function settingSourcesArgs(value) {
+  if (value === undefined || value === "") return [];
+  const parts = value.split(",").map((s) => s.trim());
+  const allowed = new Set(["user", "project", "local"]);
+  if (parts.some((p) => !allowed.has(p))) {
+    throw new Error(
+      `SKILL_EVAL_SETTING_SOURCES must list only user, project or local; got \`${value}\``,
+    );
+  }
+  if (!parts.includes("project")) {
+    throw new Error(
+      `SKILL_EVAL_SETTING_SOURCES must include project (the skills under test load from it); got \`${value}\``,
+    );
+  }
+  return ["--setting-sources", parts.join(",")];
 }
 
 /**

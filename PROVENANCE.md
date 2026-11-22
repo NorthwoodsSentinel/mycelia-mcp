@@ -302,14 +302,14 @@ reporting enabled.
 ## Skill validator and skill eval
 
 Copied from the Inspector at `d330df96` (blob ids read with
-`git rev-parse d330df96:<path>`). `skills:eval` is run by hand only.
+`git rev-parse d330df96:<path>`). `skills:eval` is run by hand only. Its spend was each run's to be approved until 2026-11-22, when the owner approved it as standing; `AGENTS.md`, "Maintaining the skills", rule 3, says so (NOR-694).
 
 | This repo | Source (Inspector) | Git blob id | Edits |
 | --- | --- | --- | --- |
 | `scripts/verify-skills-cli.mjs` | `scripts/verify-skills-cli.mjs` (129 lines) | `13c91b4cf08390b3d673df189f0b3dc53fabef55` | A header; `isMainModule` entry check. The local-CLI trust of a version banner is the source's, kept. |
 | `scripts/verify-skills-cli.test.mjs` | same path (114 lines) | `2c93a77d5f355d70e413c7c4b5fd1541e7ee3246` | Unchanged below a provenance note. |
-| `scripts/skill-eval.mjs` | `scripts/skill-eval.mjs` (1078 lines) | `615e7594d260fd1c096bd21b3d5d1fd02f638a36` | A header; `isMainModule` entry check. Both runners kept; isolation left to the caller, as in the source. |
-| `scripts/skill-eval.test.mjs` | same path (1159 lines) | `d0ec5d9ecfb0b00018efd1391826b481822aaf96` | A provenance note; the placeholder home directory in the `agentEnv` case is `/home/dev`. |
+| `scripts/skill-eval.mjs` | `scripts/skill-eval.mjs` (1078 lines) | `615e7594d260fd1c096bd21b3d5d1fd02f638a36` | A header; `isMainModule` entry check. Both runners kept; isolation left to the caller, as in the source. Added here (NOR-614): the opt-in `SKILL_EVAL_SETTING_SOURCES` (`settingSourcesArgs`), which narrows the settings files an eval session loads and refuses a value without `project`. |
+| `scripts/skill-eval.test.mjs` | same path (1159 lines) | `d0ec5d9ecfb0b00018efd1391826b481822aaf96` | A provenance note; the placeholder home directory in the `agentEnv` case is `/home/dev`. Added here (NOR-614): the `settingSourcesArgs` case. |
 | `scripts/lib/claude-cli.mjs`, test | same paths (105, 106 lines) | `060fa37681afcc49ce664194b003af0b6c0b28e0`, `b590da109dec04c8bba2c2de99462de3ff29805c` | Unchanged below a provenance note. |
 | `scripts/lib/win-shell-args.mjs`, test | same paths (62, 61 lines) | `05b4ecd5315a18afc79138bce326a4b89d10fbdd`, `2cfd0b8aa7c1cfd40f7a1d3ccb7bead62fa89bc7` | Unchanged below a provenance note. |
 | `docs/skill-authoring.md` | same path (587 lines) | `945b472736dffbf949ca77faa7d4f8ec6e44b4f5` | Method kept as written. Runnable commands name this repo's skill (`client-smoke`); "Measuring GitHub Copilot" cut to what applies here; a banner says the remaining worked examples and numbers are the Inspector's. |
@@ -322,4 +322,4 @@ Copied from the Inspector at `d330df96` (blob ids read with
 
 `docs/ai-software-factory.md` (NOR-690) was written here, not copied. Its section order follows the servers' page of the same name (`modelcontextprotocol/servers`, commit `ec089ce1`, `docs/ai-software-factory.md`, 247 lines, blob `85e46296abfffb672cbc747183f4e6aa1e3ad653`), read in part: its headings, its opening, "The headline change" and "What makes it work". The other sections of that page were not read for this one, and the Inspector's own page was not read.
 
-Every count on the page was taken from this repository's tree at `007915d` or from GitHub on 2026-11-22, with its command beside it. Ticket states were read in Linear; the wording of the plan's steps, who named the process label, and the fresh-session test in the S1 row come from the adoption's own record, kept outside this repository. Two sections have no counterpart in the source: "What is not built yet" and "The adoption, step by step". Where the source's point does not hold here, the page says so in place: no sweeps on `main`, no model in CI, no release procedure, and no measured trigger rates on `main`.
+Every count on the page was taken from this repository's tree or from GitHub on 2026-11-22, first at `007915d` and again at `3eda5c9` when the page was brought up to date (NOR-693), with its command beside it. Ticket states were read in Linear; the wording of the plan's steps, who named the process label, and the fresh-session test in the S1 row come from the adoption's own record, kept outside this repository. Two sections have no counterpart in the source: "What is not built yet" and "The adoption, step by step". Where the source's point does not hold here, the page says so in place: no upstream watch, no model in CI, no release procedure, and no measured trigger rates on `main`.
