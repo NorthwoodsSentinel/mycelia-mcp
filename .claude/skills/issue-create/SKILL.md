@@ -62,7 +62,7 @@ list_issues  team: "Northwoods-Sentinel"  query: "<keywords>"  includeArchived: 
 ## 5–6. Parent and priority
 
 - **Parent:** set `parentId` when the issue is a piece of a larger one. A sub-issue inherits nothing automatically, so give it its own labels.
-- **Priority:** `AGENTS.md` has no rubric yet, so an agent never asserts one. Pass `priority` only when the owner gave a value, and quote them.
+- **Priority:** the priority rubric is in `/issue-triage`, and an agent never asserts one without it. At filing, pass `priority` only when the owner gave a value, and quote them; otherwise leave it unset, and the ticket is scored by that skill.
 
 ## Create it
 

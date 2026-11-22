@@ -1,0 +1,34 @@
+[
+  {
+    "prompt": "Triage the new issues.",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "How do I decide what Priority a ticket in Backlog deserves?",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "Audit the NOR tickets for anything that has drifted.",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "How do I triage a ticket that is already In Progress but was never scored?",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "Score NOR-405 against the priority rubric and record the result.",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "List the open GitHub issues that have no NOR ticket yet.",
+    "expect": "issue-triage"
+  },
+  {
+    "prompt": "Who wrote the novel Moby-Dick?",
+    "expect": null
+  },
+  {
+    "prompt": "Convert 45 degrees Celsius to Fahrenheit.",
+    "expect": null
+  }
+]
