@@ -44,7 +44,12 @@
 //      drops pull requests, and keeps the issue that `isSweepAuthored` accepts
 //      (written by `github-actions[bot]`, carrying `SWEEP_LABELS`) and whose
 //      body starts with the marker. Search can lag an issue that was just
-//      created; the listing does not, and it is not capped.
+//      created; the listing does not, and it is not capped. Two checks on
+//      what the listing holds (the pull request's audit, round 2): an entry
+//      that is not an object throws, where it would have counted as "not
+//      mine" and a second issue been filed; and the number of the issue the
+//      sweep takes must be a positive integer, because it is the one field
+//      of the listing that reaches `gh` as an argument of its own.
 //   7. ADDITION A3 — every issue write goes through `pacedWrites`, which waits
 //      one second before any write after the first (`AGENTS.md`: "Pace bulk
 //      GitHub writes"). A run makes one write today, so the wait does not
@@ -62,18 +67,20 @@
 //      sweep would have replaced a real table with that row. So `parseOutdated`
 //      throws on npm's error report, on JSON that is not an object of packages
 //      (an array reads as "nothing outdated", a string as a package called
-//      `0`), and on an entry that is not an object (the source renders it as a
-//      row of placeholders). And `runOutdated` throws when npm printed
+//      `0`), and on an entry that is not an object or that has none of
+//      `current`, `wanted` and `latest` (the source renders either as a row
+//      of placeholders). And `runOutdated` throws when npm printed
 //      NOTHING, at either accepted status: with nothing outdated npm prints
 //      `{}` and exits 0 (measured the same day with npm 11.20.0 and with npm
 //      10.9.11, the line Node 22 bundles), so an empty answer is a short
 //      read, and read as a list it would clear an open issue's table. A
 //      clean run is untouched. Sources: the review model's attack cases 2, 3
 //      and 4 (`scripts/dependency-refresh-attack.test.mjs`) and its audit of
-//      the pull request, round 1. Kept as the source has it: a missing
-//      `current`, `wanted` or `latest` in an entry is filled with a
-//      placeholder, because npm really prints such an entry (no `current`)
-//      for a package that is not installed. Not handled: npm prints an ARRAY
+//      the pull request, rounds 1 and 2. Kept as the source has it: ONE or
+//      TWO missing fields of an entry are filled with a placeholder, because
+//      npm really prints such an entry (no `current`) for a package that is
+//      not installed; and a field's value is rendered as printed, without a
+//      check that it is a version. Not handled: npm prints an ARRAY
 //      for a name that is outdated in more than one place. This repository
 //      has one install and no workspaces, so that is refused like any other
 //      entry that is not an object, and the run is red.
@@ -185,8 +192,8 @@ export const PLACEMENT_DOC = `https://github.com/${REPO_SLUG}/blob/main/AGENTS.m
  * Normalize one install's `npm outdated --json` output.
  *
  * Throws on an answer that is not a list of packages (edit 8 in the header):
- * JSON that is not an object, an entry that is not an object, and npm's own
- * error report, which it prints on standard output with exit status 1 — the
+ * JSON that is not an object, an entry that is not an object or has none of
+ * the three version fields, and npm's own error report, which it prints on standard output with exit status 1 — the
  * status that otherwise means "something is outdated".
  *
  * An empty string still parses to an empty list here, as in the source; it is
@@ -226,6 +233,13 @@ export function parseOutdated(json) {
       if (info === null || typeof info !== "object" || Array.isArray(info)) {
         throw new Error(
           `npm outdated printed an entry for ${JSON.stringify(name)} that is not an object`,
+        );
+      }
+      // The placeholders below are for an entry npm really prints with one
+      // field missing. An entry with none of the three says nothing at all.
+      if (!("current" in info) && !("wanted" in info) && !("latest" in info)) {
+        throw new Error(
+          `npm outdated printed an entry for ${JSON.stringify(name)} with none of current, wanted and latest`,
         );
       }
       return {
@@ -565,22 +579,40 @@ function latestReleaseTag(action, spawn) {
  * is not a list of pages; it does not check a total, which this endpoint does
  * not give (design, accepted limitations).
  *
+ * Two things about what the listing holds are checked here, and both throw.
+ * An entry that is not an object is not an issue: skipped as "not mine", it
+ * would let a malformed answer stand for "no issue of mine is open". And the
+ * issue this returns has a positive integer `number`: that field is handed to
+ * `gh issue edit` as an argument of its own, so anything else, a string that
+ * `gh` could read as an option above all, must never get there.
+ *
  * @returns {{number: number, body: string} | null}
+ * @throws on a failed or malformed listing, and on an own issue with no usable number
  */
 function findExistingIssue(repo, spawn) {
-  const issues = ghPaginatedList(
-    spawn,
-    `repos/${repo}/issues?state=open&labels=dependabot&per_page=100`,
-  );
-  return (
+  const path = `repos/${repo}/issues?state=open&labels=dependabot&per_page=100`;
+  const issues = ghPaginatedList(spawn, path);
+  for (const issue of issues) {
+    if (issue === null || typeof issue !== "object" || Array.isArray(issue)) {
+      throw new Error(
+        `unexpected response from ${path}: an entry that is not an object`,
+      );
+    }
+  }
+  const own =
     issues.find(
       (issue) =>
-        !issue?.pull_request &&
+        !issue.pull_request &&
         isSweepAuthored(issue, SWEEP_LABELS) &&
         typeof issue.body === "string" &&
         issue.body.startsWith(ISSUE_MARKER),
-    ) ?? null
-  );
+    ) ?? null;
+  if (own !== null && !(Number.isSafeInteger(own.number) && own.number > 0)) {
+    throw new Error(
+      `unexpected response from ${path}: this sweep's own issue has no positive integer number`,
+    );
+  }
+  return own;
 }
 
 function editIssue(repo, number, body, spawn, write) {

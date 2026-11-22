@@ -1065,3 +1065,94 @@ test("main fails the sweep when a release lookup prints nothing at exit 0, and d
   assert.equal(ghCall(spawn, "create"), undefined);
   assert.equal(ghCall(spawn, "edit"), undefined);
 });
+
+// The audit of the pull request, round 2: what the issue listing holds, and
+// an npm entry that says nothing.
+
+test("main fails the sweep when the listing holds an entry that is not an object, and files nothing", () => {
+  // Skipped as "not mine", such an entry would let a malformed answer stand
+  // for "no issue of mine is open", and a second issue would be filed.
+  for (const entry of [null, "x", 7, []]) {
+    const spawn = fakeSpawn({ outdated: BEHIND, listing: [[entry]] });
+    assert.throws(
+      () => captureLog(() => main("o/r", spawn)),
+      /issues\?state=open.*an entry that is not an object/,
+      JSON.stringify(entry),
+    );
+    assert.equal(ghCall(spawn, "create"), undefined);
+    assert.equal(ghCall(spawn, "edit"), undefined);
+  }
+  // Behind the sweep's real issue too: the whole listing is refused.
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    listing: [[sweepIssue(77, `${ISSUE_MARKER}\nold`), null]],
+  });
+  assert.throws(() => captureLog(() => main("o/r", spawn)), /not an object/);
+  assert.equal(ghCall(spawn, "edit"), undefined);
+});
+
+test("the number of the sweep's own issue must be a positive integer before it reaches gh", () => {
+  // It is the one field of the listing that becomes an argument of its own.
+  // "--help" there would be read by `gh` as an option: it would print its
+  // help, exit 0, and the sweep would log an update it never made.
+  for (const number of [
+    "--help",
+    "77",
+    "77 --repo other/repo",
+    0,
+    -1,
+    1.5,
+    null,
+    undefined,
+    [77],
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    for (const outdated of [BEHIND, {}]) {
+      const spawn = fakeSpawn({
+        outdated,
+        existing: [sweepIssue(number, `${ISSUE_MARKER}\nold`)],
+      });
+      assert.throws(
+        () => captureLog(() => main("o/r", spawn)),
+        /this sweep's own issue has no positive integer number/,
+        String(number),
+      );
+      assert.equal(ghCall(spawn, "edit"), undefined);
+      assert.equal(ghCall(spawn, "create"), undefined);
+    }
+  }
+});
+
+test("an odd number on an issue that is not the sweep's own stops nothing", () => {
+  // Only the issue the sweep takes is checked: someone else's entry is never
+  // handed to `gh`.
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    existing: [
+      sweepIssue("--help", "not the marker"),
+      sweepIssue(77, `${ISSUE_MARKER}\nold`),
+    ],
+  });
+  captureLog(() => main("o/r", spawn));
+  assert.deepEqual(ghCall(spawn, "edit").args.slice(0, 3), [
+    "issue",
+    "edit",
+    "77",
+  ]);
+});
+
+test("parseOutdated throws on an entry with none of the three version fields", () => {
+  for (const entry of [{}, { dependent: "x", location: "node_modules/pkg" }]) {
+    assert.throws(
+      () => parseOutdated(JSON.stringify({ pkg: entry })),
+      /an entry for "pkg" with none of current, wanted and latest/,
+    );
+  }
+  // One field is enough to be an entry; the other two are filled in.
+  for (const field of ["current", "wanted", "latest"]) {
+    assert.equal(
+      parseOutdated(JSON.stringify({ pkg: { [field]: "1.0.0" } })).length,
+      1,
+    );
+  }
+});
