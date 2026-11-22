@@ -17,8 +17,12 @@
 //   - below the line "written here": the cases for addition A1 (a marker is
 //     trusted only on what the automation wrote; the labelled listing), for
 //     addition A3 (issue writes go through the paced writer), for a write that
-//     fails, for the issue text naming nothing of the source's, and for a
-//     failed `npm outdated` that exits 1 (the script's edit 8).
+//     fails, for the issue text naming nothing of the source's, and for
+//     reads that failed or came back short (the script's edits 8 and 9);
+//   - the fake's CLEAN answers are what the real programs print, measured:
+//     `{}` from `npm outdated` and a line break from the release lookup. The
+//     source's fake answered both with nothing at all, which the script now
+//     refuses as a short read.
 //
 // The review model's adversarial cases for this sweep are in
 // `scripts/dependency-refresh-attack.test.mjs`. Record: PROVENANCE.md, "Sweeps".
@@ -86,6 +90,8 @@ function sweepIssue(number, body, overrides = {}) {
  * @param {unknown} [opts.listing] the whole slurped listing answer, in place of `[existing]`
  * @param {number} [opts.listingStatus] exit status of the listing call
  * @param {string[]} [opts.releaseTags] tags every action's release list returns
+ * @param {{status: number, stdout: string, stderr: string}} [opts.releasesResult]
+ *   the whole result of every release lookup, in place of the three around it
  * @param {number} [opts.releasesStatus] exit status for every release lookup
  * @param {string} [opts.releasesStderr] stderr for a failing release lookup
  * @param {number} [opts.createStatus] exit status of `gh issue create`
@@ -102,6 +108,7 @@ function fakeSpawn({
   releaseTags = [],
   releasesStatus,
   releasesStderr = "",
+  releasesResult,
   createStatus = 0,
   createStderr = "",
   editStatus = 0,
@@ -114,9 +121,10 @@ function fakeSpawn({
       const payload = outdated[opts.cwd] ?? {};
       const found = Object.keys(payload).length > 0;
       return {
-        // Real `npm outdated` exits 1 precisely when it found something.
+        // Real `npm outdated` exits 1 precisely when it found something, and
+        // prints `{}` when it found nothing. A failed run prints nothing.
         status: outdatedStatus ?? (found ? 1 : 0),
-        stdout: found ? JSON.stringify(payload) : "",
+        stdout: outdatedStatus ? "" : JSON.stringify(payload),
         stderr: outdatedStatus ? "ENOTFOUND registry.npmjs.org" : "",
       };
     }
@@ -125,11 +133,14 @@ function fakeSpawn({
     // matching on args[0] alone hands the release lookup the issue listing
     // and the assertion silently checks nothing.
     if (args[0] === "api" && args.some((a) => a.includes("/releases")))
-      return {
-        status: releasesStatus ?? 0,
-        stdout: releasesStatus ? "" : releaseTags.join("\n"),
-        stderr: releasesStderr,
-      };
+      return (
+        releasesResult ?? {
+          status: releasesStatus ?? 0,
+          // Real `gh` prints one line per page: no releases is a line break.
+          stdout: releasesStatus ? "" : `${releaseTags.join("\n")}\n`,
+          stderr: releasesStderr,
+        }
+      );
     if (args[0] === "api" && args.some((a) => a.includes("/issues?")))
       return {
         status: listingStatus ?? 0,
@@ -977,4 +988,80 @@ test("a clean npm outdated, exit 0 and an empty object, is still a clean run", (
   });
   const log = captureLog(() => main("o/r", spawn));
   assert.ok(log.some((l) => l.includes("no-op")));
+});
+
+// The audit of the pull request, round 1: three reads that came back short
+// or malformed and were taken for an answer.
+
+test("main fails the sweep when npm outdated prints nothing at exit 0, and does not clear the open issue", () => {
+  // A clean npm prints `{}`. Nothing printed is a short read; read as a list
+  // it is an empty one, and the open issue's table would be cleared.
+  const spawn = fakeSpawn({
+    outdatedResult: { status: 0, stdout: "", stderr: "" },
+    existing: [sweepIssue(77, `${ISSUE_MARKER}\n| \`zod\` | 3.0.0 |`)],
+  });
+  assert.throws(
+    () => captureLog(() => main("o/r", spawn)),
+    /npm outdated in \. exited 0 and printed nothing/,
+  );
+  assert.equal(ghCall(spawn, "create"), undefined);
+  assert.equal(ghCall(spawn, "edit"), undefined);
+  // White space alone is nothing too.
+  const blank = fakeSpawn({
+    outdatedResult: { status: 0, stdout: " \n", stderr: "" },
+  });
+  assert.throws(
+    () => captureLog(() => main("o/r", blank)),
+    /exited 0 and printed nothing/,
+  );
+});
+
+test("parseOutdated throws on an entry that is not an object, instead of a row of placeholders", () => {
+  for (const entry of [[], "1.0.0", 7, true, null, [{ current: "1.0.0" }]]) {
+    assert.throws(
+      () => parseOutdated(JSON.stringify({ pkg: entry })),
+      /an entry for "pkg" that is not an object/,
+      JSON.stringify(entry),
+    );
+  }
+  // One bad entry refuses the whole answer: the good one is not listed alone.
+  assert.throws(
+    () =>
+      parseOutdated(
+        JSON.stringify({
+          ajv: { current: "8.0.0", wanted: "8.1.0", latest: "8.1.0" },
+          pkg: [],
+        }),
+      ),
+    /an entry for "pkg" that is not an object/,
+  );
+});
+
+test("parseOutdated still fills a missing field of a real entry, as the source does", () => {
+  // npm prints an entry with no `current` for a package that is not
+  // installed (measured for the design). That is a real answer, not a
+  // malformed one, and its row says so.
+  assert.deepEqual(
+    parseOutdated(
+      JSON.stringify({ pkg: { wanted: "1.2.0", latest: "2.0.0" } }),
+    ),
+    [{ name: "pkg", current: "(missing)", wanted: "1.2.0", latest: "2.0.0" }],
+  );
+});
+
+test("main fails the sweep when a release lookup prints nothing at exit 0, and does not clear the open issue", () => {
+  // `gh` prints one line per page, so a repository with no release still
+  // prints a line break (the benign case, tested above). No bytes at all
+  // means no page was read. Taken for "no releases", every action here
+  // would drop out of the ranking and the open issue would be cleared.
+  const spawn = fakeSpawn({
+    releasesResult: { status: 0, stdout: "", stderr: "" },
+    existing: [sweepIssue(77, `${ISSUE_MARKER}\n| \`actions/checkout\` |`)],
+  });
+  assert.throws(
+    () => captureLog(() => main("o/r", spawn)),
+    /release lookup for .* printed nothing \(exit 0\)/,
+  );
+  assert.equal(ghCall(spawn, "create"), undefined);
+  assert.equal(ghCall(spawn, "edit"), undefined);
 });

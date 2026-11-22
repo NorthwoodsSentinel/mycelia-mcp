@@ -60,14 +60,30 @@
 //      with `{"error": {"code": …, "summary": …}}` on standard output. Parsed
 //      the source's way that is one outdated package called `error`, and the
 //      sweep would have replaced a real table with that row. So `parseOutdated`
-//      throws on npm's error report, and on JSON that is not an object of
-//      packages (an array reads as "nothing outdated", a string as a package
-//      called `0`), and `runOutdated` throws on exit 1 with nothing printed
-//      (exit 1 says something is outdated; an empty answer is a short read).
-//      The last three are the review model's attack cases 2, 3 and 4
-//      (`scripts/dependency-refresh-attack.test.mjs`). With nothing outdated
-//      npm prints `{}` and exits 0 (measured the same day), so a clean run is
-//      untouched.
+//      throws on npm's error report, on JSON that is not an object of packages
+//      (an array reads as "nothing outdated", a string as a package called
+//      `0`), and on an entry that is not an object (the source renders it as a
+//      row of placeholders). And `runOutdated` throws when npm printed
+//      NOTHING, at either accepted status: with nothing outdated npm prints
+//      `{}` and exits 0 (measured the same day with npm 11.20.0 and with npm
+//      10.9.11, the line Node 22 bundles), so an empty answer is a short
+//      read, and read as a list it would clear an open issue's table. A
+//      clean run is untouched. Sources: the review model's attack cases 2, 3
+//      and 4 (`scripts/dependency-refresh-attack.test.mjs`) and its audit of
+//      the pull request, round 1. Kept as the source has it: a missing
+//      `current`, `wanted` or `latest` in an entry is filled with a
+//      placeholder, because npm really prints such an entry (no `current`)
+//      for a package that is not installed. Not handled: npm prints an ARRAY
+//      for a name that is outdated in more than one place. This repository
+//      has one install and no workspaces, so that is refused like any other
+//      entry that is not an object, and the run is red.
+//   9. A release list that printed NOTHING throws (the same audit round).
+//      The lookup asks `gh` for one line of tags per page, so a repository
+//      with no release at all still prints a line break (measured: one
+//      byte). Zero bytes with exit 0 means no page was read; the source
+//      takes it for "this action cuts no releases" and stops ranking the
+//      action. Unchanged, and a known limit: the lookup still trusts each
+//      page `gh` printed, with no count to check a list against.
 //
 // Unchanged: that `npm outdated --json` is what is asked (measured over a tree
 // installed by Bun: docs/DESIGN-nor-673-sweeps.md, section 3) and that only
@@ -169,13 +185,16 @@ export const PLACEMENT_DOC = `https://github.com/${REPO_SLUG}/blob/main/AGENTS.m
  * Normalize one install's `npm outdated --json` output.
  *
  * Throws on an answer that is not a list of packages (edit 8 in the header):
- * JSON that is not an object, and npm's own error report, which it prints on
- * standard output with exit status 1 — the status that otherwise means
- * "something is outdated".
+ * JSON that is not an object, an entry that is not an object, and npm's own
+ * error report, which it prints on standard output with exit status 1 — the
+ * status that otherwise means "something is outdated".
+ *
+ * An empty string still parses to an empty list here, as in the source; it is
+ * `runOutdated` that refuses an empty answer from npm.
  *
  * @param {string} json raw stdout from `npm outdated --json` (may be `""` or `"{}"`)
  * @returns {Array<{name: string, current: string, wanted: string, latest: string}>}
- * @throws on JSON that is not an object of packages, and on npm's error report
+ * @throws on JSON that is not an object of package objects, and on npm's error report
  */
 export function parseOutdated(json) {
   const trimmed = json.trim();
@@ -203,12 +222,19 @@ export function parseOutdated(json) {
     );
   }
   return Object.entries(parsed)
-    .map(([name, info]) => ({
-      name,
-      current: info.current ?? "(missing)",
-      wanted: info.wanted ?? info.current ?? "?",
-      latest: info.latest ?? "?",
-    }))
+    .map(([name, info]) => {
+      if (info === null || typeof info !== "object" || Array.isArray(info)) {
+        throw new Error(
+          `npm outdated printed an entry for ${JSON.stringify(name)} that is not an object`,
+        );
+      }
+      return {
+        name,
+        current: info.current ?? "(missing)",
+        wanted: info.wanted ?? info.current ?? "?",
+        latest: info.latest ?? "?",
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -404,13 +430,13 @@ function runOutdated(dir, spawn) {
     );
   }
   const stdout = result.stdout ?? "";
-  // Exit 1 says "something is outdated", so it comes with a list. With
-  // nothing printed it is a short read, and read as a list it would be an
-  // empty one: "nothing is behind", and an open issue's table cleared (edit 8
-  // in the header).
-  if (result.status === 1 && stdout.trim() === "") {
+  // npm always prints a list: `{}` when nothing is outdated (exit 0), the
+  // outdated packages otherwise (exit 1). Nothing printed is a short read at
+  // either status, and read as a list it would be an empty one: "nothing is
+  // behind", and an open issue's table cleared (edit 8 in the header).
+  if (stdout.trim() === "") {
     throw new Error(
-      `npm outdated in ${dir} exited 1, which says something is outdated, and printed nothing: ${(result.stderr ?? "").trim()}`,
+      `npm outdated in ${dir} exited ${result.status} and printed nothing, where a complete answer is a JSON object: ${(result.stderr ?? "").trim()}`,
     );
   }
   return stdout;
@@ -478,7 +504,7 @@ function comparePadded(a, b) {
  * @returns {string | null} `null` ONLY for a successful response carrying no
  *   usable release — an action that has never cut one, or whose tags are all
  *   unparseable. A failed lookup is never `null`; see below.
- * @throws on any non-zero status, 404 included
+ * @throws on any non-zero status, 404 included, and on an answer of no bytes
  */
 function latestReleaseTag(action, spawn) {
   // `owner/repo/subpath@ref` is a valid `uses:`; releases live on `owner/repo`.
@@ -505,6 +531,14 @@ function latestReleaseTag(action, spawn) {
   if (result.status !== 0) {
     throw new Error(
       `release lookup for ${repo} failed (exit ${result.status}): ${(result.stderr ?? "").trim()}`,
+    );
+  }
+  // One line of tags is printed per page, so even a repository with no
+  // release prints a line break. Nothing at all means no page was read, and
+  // that is a failed lookup, not "no releases" (edit 9 in the header).
+  if ((result.stdout ?? "") === "") {
+    throw new Error(
+      `release lookup for ${repo} printed nothing (exit 0), where even an empty release list prints a line`,
     );
   }
   const tags = result.stdout

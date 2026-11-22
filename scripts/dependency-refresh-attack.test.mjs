@@ -18,8 +18,8 @@
 // amended.
 //
 // What "current behavior" in a case's text means: the commit the round read.
-// Four cases named a wrong verdict there, and each was fixed in the commit
-// that brought this file in:
+// Five cases failed there, and each was fixed in the commit that brought
+// this file in:
 //
 //   - case 1: AGENTS.md still carried the "no sweeps yet" marker under the
 //     monthly rule;
@@ -65,7 +65,7 @@ const ONE_BEHIND = {
 
 /**
  * A fake `spawnSync`: `npm` answers with `npm`, the issue listing with
- * `listing`, every release list is empty, and an issue write succeeds. Every
+ * `listing`, every action has no release, and an issue write succeeds. Every
  * call is recorded with its options. Any other program, and any other `gh`
  * call, throws.
  *
@@ -83,7 +83,8 @@ function fakeSpawn({
     if (cmd === "npm") return npm;
     if (cmd !== "gh") throw new Error(`unexpected program: ${cmd}`);
     if (args[0] === "api" && args.some((a) => a.includes("/releases")))
-      return { status: 0, stdout: "", stderr: "" };
+      // A line break: what `gh` prints for a repository with no release.
+      return { status: 0, stdout: "\n", stderr: "" };
     if (args[0] === "api" && args.some((a) => a.includes("/issues?")))
       return listing;
     if (args[0] === "issue" && (args[1] === "create" || args[1] === "edit"))
@@ -179,7 +180,7 @@ test("Codex case 2: exit 1 with empty npm outdated output is a short read, not a
     npm: { status: 1, stdout: "", stderr: "" },
     listing: listingOf(STALE),
   });
-  assert.throws(() => run(spawn), /exited 1.*printed nothing/s);
+  assert.throws(() => run(spawn), /exited 1 and printed nothing/);
   assert.deepEqual(issueCalls(spawn), []);
 });
 
