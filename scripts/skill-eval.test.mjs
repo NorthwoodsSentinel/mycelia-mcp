@@ -2,7 +2,8 @@
 // commit d330df96, scripts/skill-eval.test.mjs, with one edit: the placeholder
 // home directory in the `agentEnv` case is `/home/dev` (the source's is a
 // macOS one; the value is arbitrary). Its `#N` references, and "this repo",
-// mean the source repo. Record: PROVENANCE.md.
+// mean the source repo. Added here (NOR-614): the `settingSourcesArgs` case.
+// Record: PROVENANCE.md.
 //
 // Tests for the pure halves of the skill trigger eval (#2163).
 //
@@ -32,6 +33,7 @@ import {
   collectSkillInvocations,
   collectCopilotSkillInvocations,
   agentArgs,
+  settingSourcesArgs,
   parseCopilotVersion,
   killTree,
   stopLiveCopilotRuns,
@@ -847,6 +849,72 @@ test("a Copilot run bounds availability, not just approval", () => {
   // Copilot has no turn flag at all — the budget is enforced by `runPrompt`.
   assert.ok(!args.includes("--max-turns"));
   assert.throws(() => agentArgs("cursor", 1), /unknown agent `cursor`/);
+});
+
+test("the setting sources come from the environment when the caller passes none (NOR-614)", (t) => {
+  // This is the path a real run takes: `runPrompt` calls the argument builder
+  // without a fourth argument, so the value is whatever the variable holds.
+  const saved = process.env.SKILL_EVAL_SETTING_SOURCES;
+  t.after(() => {
+    if (saved === undefined) delete process.env.SKILL_EVAL_SETTING_SOURCES;
+    else process.env.SKILL_EVAL_SETTING_SOURCES = saved;
+  });
+  delete process.env.SKILL_EVAL_SETTING_SOURCES;
+  const unset = agentArgs("claude", 1);
+  assert.ok(!unset.includes("--setting-sources"));
+  process.env.SKILL_EVAL_SETTING_SOURCES = "project,local";
+  const fromEnv = agentArgs("claude", 1);
+  assert.deepEqual(fromEnv.slice(0, unset.length), unset);
+  assert.deepEqual(fromEnv.slice(unset.length), [
+    "--setting-sources",
+    "project,local",
+  ]);
+  // A resume id in the third position, as `runPrompt` passes, changes nothing.
+  assert.deepEqual(agentArgs("claude", 1, "some-session"), fromEnv);
+  // A bad value in the environment is refused, not passed on.
+  process.env.SKILL_EVAL_SETTING_SOURCES = "local";
+  assert.throws(() => agentArgs("claude", 1), /project/);
+});
+
+test("setting sources are opt-in and only narrow which settings load (NOR-614)", (t) => {
+  // The fourth parameter defaults to the environment, and an explicit
+  // `undefined` takes that default. So the variable is removed for this test
+  // and put back after it; otherwise a run of this file with the option set
+  // would fail here.
+  const saved = process.env.SKILL_EVAL_SETTING_SOURCES;
+  delete process.env.SKILL_EVAL_SETTING_SOURCES;
+  t.after(() => {
+    if (saved !== undefined) process.env.SKILL_EVAL_SETTING_SOURCES = saved;
+  });
+  // Unset or empty: the Claude run is the Inspector's, unchanged.
+  const base = agentArgs("claude", 1, null, undefined);
+  assert.ok(!base.includes("--setting-sources"));
+  assert.deepEqual(agentArgs("claude", 1, null, ""), base);
+  // Set: the flag follows the read-only policy; nothing before it moves.
+  const narrowed = agentArgs("claude", 1, null, " project , local ");
+  assert.deepEqual(narrowed.slice(0, base.length), base);
+  assert.deepEqual(narrowed.slice(base.length), [
+    "--setting-sources",
+    "project,local",
+  ]);
+  // Anything else never reaches the CLI.
+  assert.throws(
+    () => settingSourcesArgs("project,--bare"),
+    /only user, project or local/,
+  );
+  assert.throws(
+    () => settingSourcesArgs("project,"),
+    /only user, project or local/,
+  );
+  // Without `project` the skills under test never load, so every positive
+  // case would read as a miss.
+  for (const v of ["user", "local", "user,local"]) {
+    assert.throws(() => settingSourcesArgs(v), /must include project/);
+  }
+  // Copilot has no such flag; the value is ignored there.
+  assert.ok(
+    !agentArgs("copilot", 1, null, "project").includes("--setting-sources"),
+  );
 });
 
 /** A fake child that emits the given chunks, recording whether it was killed. */

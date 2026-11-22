@@ -398,6 +398,11 @@ Dropping the first leaves the bound resting on the deny list alone, so a tool a
 user's or a plugin's settings already permit stays reachable for all 14 turns
 (Copilot). Keep both.
 
+**OURS (NOR-614):** on a host whose user-level hooks do work on every prompt,
+run the suite with `SKILL_EVAL_SETTING_SOURCES=project,local` and add
+`--setting-sources project,local` to the probe, so the probe and the scored
+case still see the same settings. Unset, the harness adds nothing.
+
 ⚠️ **These flags are a copy of the harness's, so they go stale.** Whenever
 `runPrompt` in `scripts/skill-eval.mjs` changes its tool policy, change this
 snippet in the same edit — a probe that may call a tool the eval forbids
