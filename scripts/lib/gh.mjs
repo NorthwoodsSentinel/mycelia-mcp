@@ -1,14 +1,16 @@
 // In this repo: copied from modelcontextprotocol/inspector at commit d330df96,
 // scripts/lib/gh.mjs, by copy then edit. Its `#N` references, and the script
 // families its first paragraph names, are the source repo's. Here the callers
-// are `scripts/handoff-check.mjs` and its tests (NOR-610), and the monthly
-// dependency sweep, `scripts/dependency-refresh.mjs` (NOR-684). Edits: `OWNER`
+// are `scripts/handoff-check.mjs` and its tests (NOR-610), the monthly
+// dependency sweep, `scripts/dependency-refresh.mjs` (NOR-684), and the daily
+// alert sweep, `scripts/dependabot-alerts.mjs` (NOR-685). Edits: `OWNER`
 // and `REPO` name this repository; `COPILOT_REVIEWER_LOGIN` and `ghGraphql`
 // are removed, because nothing here uses them; and `ghPaginatedObject` is
 // added, for the endpoints that answer with one object per page and a
 // `total_count`. `ghPaginatedList` was removed with the other two while
-// nothing used it and is back now that the sweep lists its own open issues
-// through it: the source's function, with one edit, marked where it is made
+// nothing used it and is back now that the sweeps list their own open issues
+// (and the daily one an issue's comments) through it: the source's function,
+// with one edit, marked where it is made
 // (an answer of no pages at all throws). Record: PROVENANCE.md.
 //
 // Shared `gh` invocation helpers for the maintainer-workflow scripts (#2558)
