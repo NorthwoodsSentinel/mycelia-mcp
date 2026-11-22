@@ -4,7 +4,7 @@ This document is the overview of how work gets done in this repository: the rule
 
 The model was adapted from the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)'s, by way of the method the [MCP reference servers](https://github.com/modelcontextprotocol/servers) used to adopt it. This page takes its section order from the servers' document of the same name (`modelcontextprotocol/servers`, commit `ec089ce1`). What was taken, adapted or left behind, file by file and with the source commit, is [`PROVENANCE.md`](../PROVENANCE.md). The adoption was tracked in Linear under NOR-535.
 
-Every count on this page was taken on 2026-11-22 at `main` `007915d`, and the command that produced it is printed with it. The ones that use `gh` read this repository on GitHub; the rest can be re-run in a checkout. A count that could not be taken is not here. Values that are configuration and not counts, such as the coverage bar, are stated from the files that set them. Ticket states were read in Linear on the same day and cannot be re-read from a checkout.
+Every count of what is in this repository, its history or its GitHub settings was taken on 2026-11-22 at `main` `007915d`, and the command that produced it is printed with it. A number that only restates a rule or counts items listed on this page (the four public acts, the three scripts of the PR flow) has no command, because the list is beside it. The ones that use `gh` read this repository on GitHub; the rest can be re-run in a checkout. A count that could not be taken is not here. Values that are configuration and not counts, such as the coverage bar, are stated from the files that set them. Ticket states were read in Linear on the same day and cannot be re-read from a checkout.
 
 ## What is not built yet
 
@@ -12,7 +12,7 @@ This table lists every part of the source's factory that is not working on `main
 
 | Part | State on 2026-11-22 | Ticket |
 | --- | --- | --- |
-| The triage procedure (`issue-triage`) and its priority rubric | Not on `main`. Pull request 15 is open and its review left points unanswered. Until it lands, `AGENTS.md` says no rubric exists and an agent sets no Priority. | NOR-672; the open review points are NOR-688 |
+| The triage procedure (`issue-triage`) and its priority rubric | Not on `main`. Pull request 15 is open; one review point, that a score comment is recognized by its marker alone, is carried there as a known limitation. Until it lands, `AGENTS.md` says no rubric exists and an agent sets no Priority. | NOR-672; the known limitation is recorded on NOR-688 |
 | The CodeQL workflow | Not on `main`. Pull request 16 is open. | NOR-683 |
 | The monthly dependency sweep | Not on `main`. Pull request 17 is open. | NOR-684; a known weakness in its release lookup is NOR-689 |
 | The daily Dependabot-alert sweep | Not started. | NOR-685 |
@@ -71,7 +71,7 @@ Two limits on reading these. The two merged pull requests without the closing li
 
 ## One server, one transport, one process
 
-mycelia-mcp is a small MCP server, written in TypeScript and run on Bun, that wraps the Mycelia mutual-aid HTTP API. It serves eight tools over stdio from two source files, `src/index.ts` and `src/mycelia-client.ts`. It has no UI and no build step.
+mycelia-mcp is a small MCP server, written in TypeScript and run on Bun, that wraps the Mycelia mutual-aid HTTP API. It serves eight tools over stdio (`grep -c "name: \"mycelia_" src/index.ts` gives `8`) from two source files, `src/index.ts` and `src/mycelia-client.ts` (`ls src/*.ts | grep -v -F .test. | wc -l` gives `2`). It has no UI and no build step.
 
 That shape is what the adaptation was about. The Inspector is several clients over a shared core, and the servers repository is seven servers in two languages. Here the questions were smaller and different: how a tracker that is Linear replaces a GitHub project board, how the server is exercised without a real Mycelia API, and what an agent may do in public when the owner merges everything.
 
@@ -157,7 +157,7 @@ The smoke gates on one protocol era, 2025-11-25. It also tries the 2026-07-28 er
 
 ## Releases
 
-There is no release procedure in this repository. The server is run from a clone: `bun src/index.ts`, with no build step. No GitHub release exists (`gh release list -R NorthwoodsSentinel/mycelia-mcp --limit 5 | wc -l` gives `0`). `AGENTS.md` lists "publishing the package, or any release" among the owner's acts; nothing here automates one, and no workflow holds a credential (`gh secret list -R NorthwoodsSentinel/mycelia-mcp --json name --jq length` gives `0`).
+There is no release procedure in this repository. The server is run from a clone: `bun src/index.ts`, with no build step. No GitHub release exists (`gh release list -R NorthwoodsSentinel/mycelia-mcp --limit 5 | wc -l` gives `0`). `AGENTS.md` lists "publishing the package, or any release" among the owner's acts; nothing here automates one. No repository Actions secret is configured (`gh secret list -R NorthwoodsSentinel/mycelia-mcp --json name --jq length` gives `0`), so the only credential a workflow holds is the `GITHUB_TOKEN` GitHub issues to every run, and both workflows scope it to `contents: read` (`grep -A1 "^permissions:" .github/workflows/*.yml`).
 
 ## Scheduled automation: none on `main`
 
