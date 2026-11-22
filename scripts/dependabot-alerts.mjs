@@ -38,17 +38,20 @@
 //      `packages[<dir>]` is `{version}`, where `<dir>` is the reader's
 //      `node_modules/a/node_modules/b` form. So `lockfileEntries`,
 //      `isDirectDependency`, `narrowToApplicable` and `remediation` are the
-//      source's, unchanged. One check is added on what the lockfile holds: a
-//      copy of the alerted package whose version is not a semver version
-//      cannot be compared with a range, so that bump is left alone this run
-//      (the source's lockfile holds only versions; a `bun.lock` entry can
-//      name a git or file source).
+//      source's, unchanged. Two checks are added on what the lockfile holds.
+//      A copy of the alerted package whose version is not a semver version
+//      cannot be compared with a range, so that bump is not checked (the
+//      source's lockfile holds only versions; a `bun.lock` entry can name a
+//      git or file source). And a dependency map of the root workspace that
+//      is not a map makes the lockfile unreadable: "is this package
+//      declared" is read from those maps.
 //   5. The alert's `manifest_path` is NEVER opened as a file. The source hands
 //      it to `readFileSync`. Here it is compared with a fixed list
 //      (`KNOWN_MANIFESTS`: `package.json` and `bun.lock`), and the one file
 //      read is this checkout's own `bun.lock`, by a constant name. A path
-//      outside the list is `indeterminate`: logged for a person, and an issue
-//      that tracks it is left exactly as it is. With that the source's
+//      outside the list is `indeterminate`: logged for a person, an issue
+//      that tracks it is left exactly as it is, and the run ends red (edit
+//      14). With that the source's
 //      "manifest is gone" case is gone too: it cleared an issue on the
 //      strength of a missing file, and here a `bun.lock` that is missing or
 //      will not parse is a failed read, never evidence.
@@ -98,19 +101,38 @@
 //      Without the second token they differed from the shared pair only by
 //      lacking its stated output buffer.
 //  13. What `gh` hands back is checked before it is acted on, and a failed
-//      check throws. The alert listing: each entry must be an object that
-//      names its package, its manifest and its advisory, because an issue is
-//      cleared when its advisory is ABSENT from this listing, and an entry
-//      that cannot be keyed is an open alert the run cannot account for. The
-//      issue listing and each comment listing: no pages at all throws
-//      (`ghPaginatedList`), and so does an entry that is not an object. An
-//      issue this sweep takes for its own must have a positive integer
-//      `number`: it is the one field of the listing that reaches `gh` as an
-//      argument of its own. The setting, the alert listing and the issue
+//      check throws. The alert listing: each entry must be an object in the
+//      state the listing was asked for (`open`) that names its package, its
+//      manifest and its advisory, because an issue is cleared when its
+//      advisory is ABSENT from this listing, and an entry that cannot be
+//      keyed is an alert the run cannot account for; and no alert (one
+//      advisory's one range on one package in one manifest) may be listed
+//      twice. The issue listing and each comment listing: no pages at all
+//      throws (`ghPaginatedList`), and so does an entry that is not an
+//      object or that does not state its author's login and account type.
+//      An issue this sweep takes for its own must have a positive integer
+//      `number`, the one field of the listing that reaches `gh` as an
+//      argument of its own, and must state its body, where the marker is
+//      read; a comment of its own must state its body too. Six of these
+//      checks answer the review model's attack cases
+//      (`scripts/dependabot-alerts-attack.test.mjs`, cases 1 to 4, 7 and
+//      8). The setting, the alert listing and the issue
 //      listing are all read before the first write, so a failure in any of
 //      them leaves every issue as it was. A comment listing is read just
 //      before the one comment it guards; a failure there stops the run with
 //      that issue untouched, after whatever earlier bumps were written.
+//  14. An npm bump the run could NOT CHECK ends the run red. Three things
+//      make a bump uncheckable: a manifest path outside the fixed list, a
+//      `bun.lock` that cannot be read, and a locked copy whose version is not
+//      a version. Each is logged and its issue left alone, as the design
+//      says; every other bump is still filed or refreshed; and then the run
+//      fails, naming them. The source ends such a run green (its unparseable
+//      lockfile is one of five). Here there is one lockfile, and the manifest
+//      path of an alert on this repository is only inferred, so a green run
+//      could be a sweep that skipped every alert there is. Source: the
+//      review model's attack case 6. An alert that is not npm is different:
+//      it is logged and the run stays green, as in the source, because this
+//      sweep was never going to file it.
 //
 // Unchanged: the grouping by (package, manifest, patched version), the two
 // markers, the title, the order "comment first, then the marker", the
@@ -123,12 +145,12 @@
 // advisory on a transitive package raises no alert and this sweep cannot see
 // it. The `manifest_path` of an alert here is inferred to be `package.json`;
 // no alert has existed to read it from. A listing is checked for its shape,
-// not against a total, which neither endpoint gives. An alert the sweep
-// cannot check (not npm, an unknown manifest, an unreadable lockfile) is
-// logged, its issue is left alone, and the run stays green. (The workflow's
-// install step reads the same `bun.lock` first and fails on one Bun cannot
-// read; a lockfile version this reader does not know also fails the gate's
-// install guard, which uses the same reader.)
+// not against a total, which neither endpoint gives. An alert that is not
+// npm is logged and the run stays green. A failed read of the security
+// updates setting counts as "this token may not read it" for every 403 and
+// 404 that is not a rate limit, as in the source (`isPermissionDenied`): the
+// review model's attack case 5 asks for less, and is declined in the attack
+// suite with the reason.
 //
 // What this file can write: issues, issue edits and issue comments in the
 // repository `GITHUB_REPOSITORY` names, with the token `gh` finds in its
@@ -947,24 +969,46 @@ function openAlerts(repo, spawn) {
   }
   // Added in this repo (the header, edit 13). An issue is cleared when its
   // advisory is ABSENT from this listing, so every entry has to be one the run
-  // can key: an entry that is not an object, or that does not name its
-  // package, its manifest and its advisory, is an open alert the run cannot
-  // account for, and the source's grouping would drop it without a word.
+  // can key: an entry that is not an object, that is not in the state the
+  // listing was asked for, or that does not name its package, its manifest and
+  // its advisory, is an alert the run cannot account for, and the source's
+  // grouping would drop it without a word (the review model's attack cases 1
+  // and 2: an entry with no `state`, or with another, was dropped, and the
+  // issue that tracked it was cleared as "fixed or dismissed").
   const alerts = pages.flat();
   const named = (value) => typeof value === "string" && value !== "";
+  const seen = new Set();
   for (const alert of alerts) {
     if (
       alert === null ||
       typeof alert !== "object" ||
       Array.isArray(alert) ||
+      alert.state !== "open" ||
       !named(alert.dependency?.package?.name) ||
       !named(alert.dependency?.manifest_path) ||
       !named(alert.security_advisory?.ghsa_id)
     ) {
       throw new Error(
-        `dependabot-alerts: the alert listing held an entry that does not name its package, its manifest and its advisory — ${untouched}`,
+        `dependabot-alerts: the alert listing held an entry that is not an open alert naming its package, its manifest and its advisory — ${untouched}`,
       );
     }
+    // One advisory's one vulnerable range, on one package in one manifest, is
+    // one alert. Listed twice, the listing repeated an entry or contradicts
+    // itself (attack case 8: the same alert twice, with two patched versions,
+    // filed two issues). The same advisory with a DIFFERENT range is not this
+    // case and is left to the grouping, as in the source.
+    const identity = JSON.stringify([
+      alert.dependency.package.name,
+      alert.dependency.manifest_path,
+      alert.security_advisory.ghsa_id,
+      alert.security_vulnerability?.vulnerable_version_range ?? null,
+    ]);
+    if (seen.has(identity)) {
+      throw new Error(
+        `dependabot-alerts: the alert listing held the same alert twice (${alert.security_advisory.ghsa_id} on ${alert.dependency.package.name} in ${JSON.stringify(alert.dependency.manifest_path)}) — ${untouched}`,
+      );
+    }
+    seen.add(identity);
   }
   return alerts;
 }
@@ -980,11 +1024,12 @@ function openAlerts(repo, spawn) {
  * workspace, and `packages["node_modules/a/node_modules/b"]` is `{version}`.
  *
  * ⚠️ Every failure is `unreadable`, and none is evidence. A file that is
- * missing, will not parse, or is a lockfile version the reader does not know
- * says nothing about whether a package is still exposed, so the caller leaves
- * the issue alone. (The source clears an issue when the alert's manifest is
- * gone from the branch; this repository's own lockfile being gone is a broken
- * checkout, not a fixed alert.)
+ * missing, will not parse, is a lockfile version the reader does not know, or
+ * whose root workspace holds a dependency map that is not a map, says nothing
+ * about whether a package is still exposed, so the caller leaves the issue
+ * alone and the run ends red. (The source clears an issue when the alert's
+ * manifest is gone from the branch; this repository's own lockfile being gone
+ * is a broken checkout, not a fixed alert.)
  *
  * `unversioned` names every package with a copy whose locked version is not a
  * semver version: a git, file or workspace source. Such a copy cannot be
@@ -997,6 +1042,21 @@ function openAlerts(repo, spawn) {
 function readLockfile() {
   try {
     const { root, entries } = parseBunLock(readFileSync(LOCKFILE, "utf8"));
+    // The reader checks that the root is an object, not what it holds.
+    // `isDirectDependency` looks a package up in these four maps, and a map
+    // that is a list or a string answers "not declared" for every package:
+    // the issue would then give the wrong one of the three fixes (the review
+    // model's attack case 7).
+    for (const map of [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ]) {
+      if (root[map] !== undefined && !isRecord(root[map])) {
+        throw new Error(`bun.lock: the root workspace's ${map} is not a map`);
+      }
+    }
     const packages = { "": root };
     const unversioned = new Set();
     for (const entry of entries) {
@@ -1012,9 +1072,40 @@ function readLockfile() {
   }
 }
 
-/** Is this entry of a listing an object, as every issue and comment is? */
-const isRecord = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
+/** Is this value a plain object: an entry of a listing, or a map? */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Who wrote this issue or comment, as the REST listing states it: an account
+ * with a login and a type, or `null` (the endpoint's answer for an account
+ * that no longer exists).
+ *
+ * Anything else throws. The author check needs both fields, and an entry
+ * that states only one is a short answer, not somebody else's entry: read as
+ * "not the automation's", a comment of the sweep's own would stop counting
+ * and its advisory would be announced a second time (the review model's
+ * attack case 4), and an issue of its own would be filed again.
+ *
+ * @param {object} entry an issue or a comment of a REST listing
+ * @param {string} path the listing it came from, for the message
+ * @returns {{login: string, type: string} | null}
+ */
+function authorOf(entry, path) {
+  const user = entry.user;
+  if (user === null) return null;
+  if (
+    !isRecord(user) ||
+    typeof user.login !== "string" ||
+    typeof user.type !== "string"
+  ) {
+    throw new Error(
+      `unexpected response from ${path}: an entry that does not state its author's login and account type`,
+    );
+  }
+  return user;
+}
 
 /**
  * Every open `dependabot`-labeled issue that THIS automation filed.
@@ -1034,14 +1125,15 @@ const isRecord = (value) =>
  * the issue a bump still needs.
  *
  * The listing goes through `ghPaginatedList`, which throws on a failed call,
- * on an answer that is not a list of pages and on no pages at all. Two checks
- * are made here, and both throw: an entry that is not an object (skipped as
- * "not mine", it would let a malformed answer stand for "no issue of mine is
- * open", and a duplicate would be filed), and an own issue whose `number` is
- * not a positive integer (that field is handed to `gh issue edit` and
+ * on an answer that is not a list of pages and on no pages at all.
+ * Four checks are made here, and each throws: an entry that is not an object
+ * (skipped as "not mine", it would let a malformed answer stand for "no issue
+ * of mine is open", and a duplicate would be filed); an entry that does not
+ * state its author in full (`authorOf`); an own issue whose `number` is not a
+ * positive integer (that field is handed to `gh issue edit` and
  * `gh issue comment` as an argument of its own, and is put into an API path,
  * so nothing `gh` could read as an option, and nothing but a number, may get
- * there).
+ * there); and an own issue with no `body` field.
  *
  * @returns {Array<{number: number, title: unknown, body: unknown}>}
  * @throws on a failed or malformed listing, and on an own issue with no usable number
@@ -1055,6 +1147,7 @@ function openDependabotIssues(repo, spawn) {
         `unexpected response from ${path}: an entry that is not an object`,
       );
     }
+    authorOf(issue, path);
   }
   const own = issues.filter(
     (issue) => !issue.pull_request && isSweepAuthored(issue, SWEEP_LABELS),
@@ -1063,6 +1156,16 @@ function openDependabotIssues(repo, spawn) {
     if (!(Number.isSafeInteger(issue.number) && issue.number > 0)) {
       throw new Error(
         `unexpected response from ${path}: an issue of this sweep's own has no positive integer number`,
+      );
+    }
+    // The marker is read from the body. The endpoint states `body` on every
+    // issue: text, or `null` for an issue whose body someone emptied. An own
+    // issue with NO body field is a short answer; read as "no marker", it
+    // would stand for "no issue tracks this bump" and a duplicate would be
+    // filed (the review model's attack case 3).
+    if (typeof issue.body !== "string" && issue.body !== null) {
+      throw new Error(
+        `unexpected response from ${path}: an issue of this sweep's own does not state its body`,
       );
     }
   }
@@ -1089,7 +1192,9 @@ function openDependabotIssues(repo, spawn) {
  * announced. The comments are read from the REST endpoint instead, every
  * page, because it states each author's account type; that is how the
  * source's own upstream watch reads comments before `isAutomationComment`.
- * An entry that is not an object throws.
+ * An entry that is not an object throws, and so does one that does not state
+ * its author in full (`authorOf`) and a comment of the sweep's own with no
+ * body.
  */
 function announcedAdvisories(repo, number, spawn) {
   const path = `repos/${repo}/issues/${number}/comments?per_page=100`;
@@ -1100,11 +1205,17 @@ function announcedAdvisories(repo, number, spawn) {
         `unexpected response from ${path}: an entry that is not an object`,
       );
     }
-    const written = {
-      author: comment.user?.login,
-      isBot: comment.user?.type === "Bot",
-    };
+    const user = authorOf(comment, path);
+    const written = { author: user?.login, isBot: user?.type === "Bot" };
     if (!isAutomationComment(written)) continue;
+    // A comment of the sweep's own always has text. One with no `body` is a
+    // short answer, and read as "no marker" its advisory would be announced
+    // again.
+    if (typeof comment.body !== "string") {
+      throw new Error(
+        `unexpected response from ${path}: a comment of this sweep's own does not state its body`,
+      );
+    }
     for (const ghsa of parseCommentMarker(comment.body) ?? []) {
       announced.add(ghsa);
     }
@@ -1170,6 +1281,14 @@ export function main(
 
   /** Read at most once, and only when an alert needs it. */
   let lockfile;
+  /**
+   * Every npm bump this run could not check, with the reason. In this repo
+   * (the header, edit 14): each is left exactly as it was, every other bump
+   * is still processed, and then the run FAILS, naming them.
+   *
+   * @type {string[]}
+   */
+  const unchecked = [];
 
   /**
    * Rewrite an issue to its cleared state, at most once.
@@ -1301,6 +1420,9 @@ export function main(
         `dependabot-alerts: ${rawGroup.package} is reported against ${JSON.stringify(rawGroup.manifestPath)}, which is not a manifest this sweep knows (${KNOWN_MANIFESTS.join(", ")}) — it cannot check it and will not clear its issue, raise it by hand: ${rawGroup.ghsas.join(", ")}`,
       );
       note(rawGroup, rawGroup.ghsas, "indeterminate");
+      unchecked.push(
+        `${rawGroup.package} (${rawGroup.ghsas.join(", ")}): reported against ${JSON.stringify(rawGroup.manifestPath)}, which is not a manifest this sweep knows`,
+      );
       continue;
     }
 
@@ -1312,6 +1434,9 @@ export function main(
         `dependabot-alerts: ${LOCKFILE} could not be read or parsed (${lockfile.unreadable}) — skipping ${rawGroup.package} WITHOUT clearing its issue`,
       );
       note(rawGroup, rawGroup.ghsas, "indeterminate");
+      unchecked.push(
+        `${rawGroup.package} (${rawGroup.ghsas.join(", ")}): ${LOCKFILE} could not be read or parsed (${lockfile.unreadable})`,
+      );
       continue;
     }
     if (lockfile.unversioned.has(rawGroup.package)) {
@@ -1319,6 +1444,9 @@ export function main(
         `dependabot-alerts: ${rawGroup.package} has a copy in ${LOCKFILE} whose version is not a semver version, so it cannot be compared with a range — skipping it WITHOUT clearing its issue`,
       );
       note(rawGroup, rawGroup.ghsas, "indeterminate");
+      unchecked.push(
+        `${rawGroup.package} (${rawGroup.ghsas.join(", ")}): a copy in ${LOCKFILE} has a version that is not a semver version`,
+      );
       continue;
     }
     const { lock } = lockfile;
@@ -1501,6 +1629,17 @@ export function main(
 
   if (groups.length === 0) {
     console.log("dependabot-alerts: no open alerts");
+  }
+
+  // Every bump is processed before this throws, as the source did for its own
+  // end-of-run failure: an alert this run could not check is worth failing the
+  // run over, but not at the cost of the issues it could still file or
+  // refresh. Without it the run would be green having checked nothing, which
+  // is a sweep that did not sweep (the review model's attack case 6).
+  if (unchecked.length > 0) {
+    throw new Error(
+      `dependabot-alerts: ${unchecked.length} open npm ${unchecked.length === 1 ? "bump" : "bumps"} could not be checked this run; no issue of ${unchecked.length === 1 ? "its" : "theirs"} was filed, edited or cleared —\n  ${unchecked.join("\n  ")}`,
+    );
   }
 }
 

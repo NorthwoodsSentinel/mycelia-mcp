@@ -704,6 +704,26 @@ function captureLog(run) {
   return lines;
 }
 
+/**
+ * Run `run`, which must throw `message`, and return what it logged first.
+ * In this repo: a run that could not check an npm bump logs why, leaves the
+ * issue alone, and then fails (the script's header, edit 14).
+ */
+function captureLogOfFailedRun(run, message) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...a) => lines.push(a.join(" "));
+  try {
+    assert.throws(run, message);
+  } finally {
+    console.log = original;
+  }
+  return lines;
+}
+
+/** The end-of-run failure of a sweep that could not check a bump. */
+const UNCHECKED = /could not be checked this run/;
+
 /** Run `body` in a temp cwd populated with `files` (path -> JSON value, or text). */
 function inTempRepo(files, body) {
   const dir = mkdtempSync(join(tmpdir(), "dependabot-alerts-"));
@@ -824,7 +844,7 @@ test("main does not check an alert whose manifest it does not know", () => {
     ],
   });
   const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
-    captureLog(() => main("o/r", spawn)),
+    captureLogOfFailedRun(() => main("o/r", spawn), UNCHECKED),
   );
   assert.equal(ghCall(spawn, "create"), undefined);
   assert.ok(
@@ -1184,7 +1204,7 @@ test("main leaves an open issue alone when its alert names a manifest it does no
     ],
   });
   const log = inTempRepo({}, () =>
-    captureLog(() => main("o/r", spawn, "2026-09-04")),
+    captureLogOfFailedRun(() => main("o/r", spawn, "2026-09-04"), UNCHECKED),
   );
 
   assert.equal(ghCall(spawn, "edit"), undefined, "the issue is not cleared");
@@ -1576,7 +1596,11 @@ test("main does not clear an issue when the lockfile cannot be parsed", () => {
   try {
     writeFileSync(join(dir, "bun.lock"), "{ truncated…");
     process.chdir(dir);
-    log = captureLog(() => main("o/r", spawn, "2026-09-04"));
+    // In this repo the run then fails: it could not check the bump.
+    log = captureLogOfFailedRun(
+      () => main("o/r", spawn, "2026-09-04"),
+      UNCHECKED,
+    );
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -1669,7 +1693,11 @@ test("a revised bump does not clear the old issue when the probe is indeterminat
   try {
     writeFileSync(join(dir, "bun.lock"), "{ truncated…");
     process.chdir(dir);
-    log = captureLog(() => main("o/r", spawn, "2026-09-04"));
+    // In this repo the run then fails: it could not check the bump.
+    log = captureLogOfFailedRun(
+      () => main("o/r", spawn, "2026-09-04"),
+      UNCHECKED,
+    );
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -1933,13 +1961,14 @@ for (const [name, files, reason] of [
 ]) {
   test(`main neither files nor clears when bun.lock ${name}`, () => {
     // A lockfile that cannot be read is evidence of nothing: the open issue
-    // stays exactly as it is, and nothing new is filed on a guess.
+    // stays exactly as it is, nothing new is filed on a guess, and the run
+    // ends red.
     const spawn = fakeSpawn({
       alertPages: [[alert({ ghsa: "GHSA-a" })]],
       issues: [filedIssue()],
     });
     const log = inTempRepo(files, () =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
+      captureLogOfFailedRun(() => main("o/r", spawn, "2026-09-04"), UNCHECKED),
     );
     assert.deepEqual(issueWrites(spawn), []);
     assert.ok(
@@ -1966,7 +1995,10 @@ test("main does not judge a copy whose locked version is not a version", () => {
       issues,
     });
     const log = inTempRepo({ "bun.lock": lock }, () =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
+      captureLogOfFailedRun(
+        () => main("o/r", spawn, "2026-09-04"),
+        /fast-uri \(GHSA-a\): a copy in bun\.lock has a version that is not a semver version/,
+      ),
     );
     assert.deepEqual(issueWrites(spawn), []);
     assert.ok(
@@ -1998,7 +2030,14 @@ test("a package with an unversioned copy does not stop another package's issue",
       ],
     ],
   });
-  inTempRepo({ "bun.lock": lock }, () => captureLog(() => main("o/r", spawn)));
+  // The run fails at its end, naming the one it could not check, after it has
+  // filed the one it could.
+  inTempRepo({ "bun.lock": lock }, () =>
+    captureLogOfFailedRun(
+      () => main("o/r", spawn),
+      /1 open npm bump could not be checked this run; no issue of its was filed, edited or cleared —\n {2}qs \(GHSA-q\)/,
+    ),
+  );
   const created = ghCalls(spawn, "create");
   assert.equal(created.length, 1);
   assert.match(
@@ -2058,7 +2097,7 @@ test("a file at the path an alert names is never read: an unknown manifest is no
     if (!manifest.startsWith("..")) files[manifest] = vulnerable;
     files["bun.lock"] ??= lockWith("fast-uri", "3.1.6");
     const log = inTempRepo(files, () =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
+      captureLogOfFailedRun(() => main("o/r", spawn, "2026-09-04"), UNCHECKED),
     );
     assert.deepEqual(issueWrites(spawn), [], manifest);
     assert.ok(
@@ -2129,10 +2168,6 @@ const NOT_THE_SWEEPS = [
     { user: { login: "github-actions[bot]", type: "User" } },
   ],
   ["another bot wrote it", { user: { login: "other[bot]", type: "Bot" } }],
-  [
-    "its author has no account type",
-    { user: { login: "github-actions[bot]" } },
-  ],
   ["it has no author", { user: null }],
   ["it lacks the chore label", { labels: [{ name: "dependabot" }] }],
   ["it has no labels", { labels: [] }],
@@ -2233,6 +2268,10 @@ test("an alert entry that cannot be keyed stops the run before anything is touch
   pathless.dependency.manifest_path = "";
   const unadvised = alert({ ghsa: "GHSA-a" });
   delete unadvised.security_advisory;
+  // And one that is not in the state the listing was asked for: dropped by
+  // the grouping, it would read as an alert that went away.
+  const stateless = alert({ ghsa: "GHSA-a" });
+  delete stateless.state;
   for (const entry of [
     null,
     "an alert",
@@ -2242,13 +2281,16 @@ test("an alert entry that cannot be keyed stops the run before anything is touch
     nameless,
     pathless,
     unadvised,
+    stateless,
+    alert({ ghsa: "GHSA-a", state: "dismissed" }),
+    alert({ ghsa: "GHSA-a", state: "fixed" }),
   ]) {
     assertListingFailureTouchesNothing(
       {
         status: 0,
         stdout: JSON.stringify([[alert({ ghsa: "GHSA-b" }), entry]]),
       },
-      /held an entry that does not name its package, its manifest and its advisory/,
+      /held an entry that is not an open alert naming its package, its manifest and its advisory/,
     );
   }
 });
@@ -2511,4 +2553,236 @@ test("with the default writer, a run that makes one write goes straight through"
   const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
   inTempRepo(VULNERABLE, () => captureLog(() => sweepMain("o/r", spawn)));
   assert.equal(issueWrites(spawn).length, 1);
+});
+
+// --- edits 13 and 14, as the review model's attack cases left them -------------
+// The cases themselves are in scripts/dependabot-alerts-attack.test.mjs, each
+// under its own text. These hold the edges of the fixes in place: what each
+// check refuses, and what it must go on accepting.
+
+test("the same alert listed twice stops the run; the same advisory with another range does not", () => {
+  // One advisory's one range on one package in one manifest is one alert.
+  for (const second of [
+    alert({ ghsa: "GHSA-a" }),
+    alert({ ghsa: "GHSA-a", fixed: "3.1.7" }),
+  ]) {
+    assertListingFailureTouchesNothing(
+      {
+        status: 0,
+        stdout: JSON.stringify([[alert({ ghsa: "GHSA-a" })], [second]]),
+      },
+      /held the same alert twice \(GHSA-a on fast-uri in "package\.json"\)/,
+    );
+  }
+
+  // An advisory can name two ranges of one package, each with its own patched
+  // version. That is two alerts and two bumps, as in the source's grouping;
+  // the lockfile then says which of them applies.
+  const spawn = fakeSpawn({
+    alertPages: [
+      [
+        alert({ ghsa: "GHSA-a" }),
+        alert({
+          ghsa: "GHSA-a",
+          fixed: "4.0.2",
+          range: ">= 4.0.0, < 4.0.2",
+        }),
+        alert({ ghsa: "GHSA-a", manifest: "bun.lock" }),
+      ],
+    ],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+  const titles = ghCalls(spawn, "create").map(
+    (c) => c.args[c.args.indexOf("--title") + 1],
+  );
+  assert.equal(titles.length, 2, "the 4.x range does not apply to 3.1.5");
+  assert.ok(titles.every((t) => t.includes("`fast-uri` to `3.1.6`")));
+});
+
+test("an issue or a comment that does not state its author in full stops the run", () => {
+  // Read as "not the automation's", the sweep's own issue would be filed again
+  // and its own comment would stop counting.
+  const partial = [
+    { login: "github-actions[bot]" },
+    { type: "Bot" },
+    { login: 7, type: "Bot" },
+    "github-actions[bot]",
+    [],
+    undefined,
+  ];
+  for (const user of partial) {
+    const own = { ...asSweepIssue(filedIssue()), user };
+    if (user === undefined) delete own.user;
+    assertIssueListingStopsTheRun(
+      { status: 0, stdout: JSON.stringify([[own]]) },
+      /an entry that does not state its author's login and account type/,
+    );
+
+    const comment = { user, body: buildCommentMarker(["GHSA-b"]) };
+    if (user === undefined) delete comment.user;
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" }), alert({ ghsa: "GHSA-b" })]],
+      issues: [filedIssue()],
+      commentsResponse: { status: 0, stdout: JSON.stringify([[comment]]) },
+    });
+    assert.throws(
+      () => inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn))),
+      /an entry that does not state its author's login and account type/,
+      JSON.stringify(user),
+    );
+    assert.deepEqual(issueWrites(spawn), []);
+  }
+});
+
+test("an issue of the sweep's own must state its body; an emptied body is a real answer", () => {
+  // No `body` field at all is a short answer, and stops the run.
+  const bodiless = asSweepIssue(filedIssue());
+  delete bodiless.body;
+  assertIssueListingStopsTheRun(
+    { status: 0, stdout: JSON.stringify([[bodiless]]) },
+    /an issue of this sweep's own does not state its body/,
+  );
+  assertIssueListingStopsTheRun(
+    {
+      status: 0,
+      stdout: JSON.stringify([[asSweepIssue(filedIssue({ body: 7 }))]]),
+    },
+    /an issue of this sweep's own does not state its body/,
+  );
+
+  // `null` is what the endpoint answers for an issue whose body was emptied.
+  // That issue carries no marker, so it tracks no bump and the bump is filed.
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" })]],
+    issues: [filedIssue({ body: null })],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+  assert.deepEqual(
+    issueWrites(spawn).map((c) => c.args[1]),
+    ["create"],
+  );
+
+  // Someone else's issue is dropped before its body is looked at.
+  const foreign = asSweepIssue(filedIssue());
+  delete foreign.body;
+  foreign.user = { login: "mallory", type: "User" };
+  const other = fakeSpawn({
+    alertPages: [[]],
+    issuesResponse: { status: 0, stdout: JSON.stringify([[foreign]]) },
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", other)));
+  assert.deepEqual(issueWrites(other), []);
+});
+
+test("a comment of the sweep's own must state its body; anyone else's need not", () => {
+  const run = (comment) => {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" }), alert({ ghsa: "GHSA-b" })]],
+      issues: [filedIssue()],
+      commentsResponse: { status: 0, stdout: JSON.stringify([[comment]]) },
+    });
+    return {
+      spawn,
+      go: () =>
+        inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn))),
+    };
+  };
+  for (const body of [undefined, null, 7]) {
+    const own = run({ user: BOT, body });
+    assert.throws(
+      own.go,
+      /a comment of this sweep's own does not state its body/,
+    );
+    assert.deepEqual(issueWrites(own.spawn), []);
+
+    const foreign = run({ user: { login: "mallory", type: "User" }, body });
+    foreign.go();
+    assert.ok(ghCall(foreign.spawn, "comment"), "the advisory is announced");
+  }
+});
+
+test("a root dependency map that is not a map makes bun.lock unreadable", () => {
+  // `isDirectDependency` reads these maps. A list or a string would answer
+  // "not declared" for every package and the issue would give the wrong fix.
+  for (const map of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ]) {
+    for (const value of [[], "fast-uri", null, 7]) {
+      const lock = lockWith("fast-uri", "3.1.5");
+      lock.workspaces[""][map] = value;
+      const spawn = fakeSpawn({
+        alertPages: [[alert({ ghsa: "GHSA-a" })]],
+        issues: [filedIssue()],
+      });
+      const log = inTempRepo({ "bun.lock": lock }, () =>
+        captureLogOfFailedRun(() => main("o/r", spawn), UNCHECKED),
+      );
+      assert.deepEqual(issueWrites(spawn), [], `${map}: ${String(value)}`);
+      assert.ok(
+        log.some((l) => l.includes(`the root workspace's ${map} is not a map`)),
+        `expected an unreadable-lockfile line for ${map}, got: ${log.join(" | ")}`,
+      );
+    }
+  }
+});
+
+test("a run that could not check some bumps still files the rest, then fails naming each", () => {
+  // Three bumps: one on a manifest the sweep does not know, one it can check
+  // and must file, one whose issue is up to date. The failure comes last.
+  const spawn = fakeSpawn({
+    alertPages: [
+      [
+        alert({
+          ghsa: "GHSA-u",
+          pkg: "aaa",
+          manifest: "sub/package.json",
+        }),
+        alert({ ghsa: "GHSA-a" }),
+        alert({
+          ghsa: "GHSA-q",
+          pkg: "qs",
+          fixed: "6.16.0",
+          range: "< 6.16.0",
+        }),
+      ],
+    ],
+    issues: [filedIssue()],
+  });
+  const log = inTempRepo(
+    { "bun.lock": lockOf({ "fast-uri": "3.1.5", qs: "6.15.3" }) },
+    () =>
+      captureLogOfFailedRun(
+        () => main("o/r", spawn),
+        /1 open npm bump could not be checked this run; no issue of its was filed, edited or cleared —\n {2}aaa \(GHSA-u\): reported against "sub\/package\.json"/,
+      ),
+  );
+  const writes = issueWrites(spawn);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].args[1], "create");
+  assert.match(writes[0].args[writes[0].args.indexOf("--title") + 1], /`qs`/);
+  assert.ok(log.some((l) => l.includes("#41 is up to date")));
+});
+
+test("an alert that is not npm is logged and does not fail the run", () => {
+  // The sweep was never going to file it, so it is not "could not check".
+  const spawn = fakeSpawn({
+    alertPages: [
+      [
+        alert({
+          ghsa: "GHSA-act",
+          pkg: "actions/checkout",
+          manifest: ".github/workflows/main.yml",
+          ecosystem: "actions",
+        }),
+      ],
+    ],
+  });
+  const log = inTempRepo(VULNERABLE, () =>
+    captureLog(() => main("o/r", spawn)),
+  );
+  assert.deepEqual(issueWrites(spawn), []);
+  assert.ok(log.some((l) => l.includes("raise it by hand: GHSA-act")));
 });
