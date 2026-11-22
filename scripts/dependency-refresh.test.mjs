@@ -1,3 +1,28 @@
+// In this repo: the MCP Inspector's test file (modelcontextprotocol/inspector
+// at commit 7df76f6eea9ea425891289333837878ebb31ae6a,
+// scripts/dependency-refresh.test.mjs, blob
+// b014cc13ded0d1adacf2c6fc981bcbbabf3cd47c), by copy then edit: the unchanged
+// file is this file's first commit here. Its "#NNNN" numbers and "(Copilot)"
+// notes are the source's. Edits, following the script's own (its header lists
+// them):
+//
+//   - the cases for the Docker half and for the milestone lookup are removed
+//     with the code they tested, and the fake `spawn` no longer answers `curl`
+//     or a milestone call: either would now be an unexpected call and fail;
+//   - the fake answers the labelled REST listing where the source's answered
+//     `gh issue list`, and an existing issue in a fixture is the REST shape,
+//     written by the automation and carrying the sweep's labels (`sweepIssue`);
+//   - `INSTALLS` is the one root install, and the issue is filed with this
+//     repository's three labels and no milestone;
+//   - below the line "written here": the cases for addition A1 (a marker is
+//     trusted only on what the automation wrote; the labelled listing), for
+//     addition A3 (issue writes go through the paced writer), for a write that
+//     fails, and for the issue text naming nothing of the source's.
+//
+// The review model's adversarial cases for this sweep are in
+// `scripts/dependency-refresh-attack.test.mjs`. Record: PROVENANCE.md, "Sweeps".
+//
+// ---- the source's header, unchanged ----
 // Tests for dependency-refresh.mjs (#2229) — both the pure parsing/formatting
 // helpers and `main()`'s orchestration, the latter driven through the injected
 // spawn function so no `npm`, `gh` or `curl` process is ever started — the
@@ -10,7 +35,6 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   buildClearedBody,
   buildIssueBody,
@@ -18,79 +42,69 @@ import {
   isActionStale,
   main,
   parseActionRefs,
-  parseDigestHeader,
-  parseDockerBaseImage,
   parseOutdated,
   parseVersionRef,
   staleActions,
-  DOCKERFILE,
-  INDEX_MEDIA_TYPES,
   INSTALLS,
+  ISSUE_LABELS,
   ISSUE_MARKER,
+  PLACEMENT_DOC,
+  SWEEP_LABELS,
 } from "./dependency-refresh.mjs";
+import { pacedWrites } from "./lib/paced-writes.mjs";
 
-/** The digest the real Dockerfile pins — what a "current" registry answers. */
-const PINNED = parseDockerBaseImage(readFileSync(DOCKERFILE, "utf8")).digest;
-const NEWER = `sha256:${"b".repeat(64)}`;
+/**
+ * An open issue as the REST issues endpoint returns one that this sweep filed:
+ * written by the automation, carrying the labels the sweep applies.
+ *
+ * @param {number} number
+ * @param {string | null} body
+ * @param {object} [overrides] fields to replace, e.g. `user` or `labels`
+ */
+function sweepIssue(number, body, overrides = {}) {
+  return {
+    number,
+    body,
+    user: { login: "github-actions[bot]", type: "Bot" },
+    labels: ISSUE_LABELS.map((name) => ({ name })),
+    ...overrides,
+  };
+}
 
 /**
  * A fake `spawnSync` that answers by command shape and records every call.
+ * Anything it does not know — another program, another `gh` subcommand — is
+ * an error, so a call this sweep is not meant to make fails the test.
  *
  * @param {object} opts
  * @param {Record<string,unknown>} [opts.outdated] parsed `npm outdated` payload, per install dir
  * @param {number} [opts.outdatedStatus] exit status for every `npm outdated`
- * @param {Array<{number:number,body:string}>} [opts.existing] what `gh issue list` returns
- * @param {string|null} [opts.milestone] what the milestone lookup returns
+ * @param {object[]} [opts.existing] the open `dependabot`-labelled issues, as one page
+ * @param {unknown} [opts.listing] the whole slurped listing answer, in place of `[existing]`
+ * @param {number} [opts.listingStatus] exit status of the listing call
  * @param {string[]} [opts.releaseTags] tags every action's release list returns
  * @param {number} [opts.releasesStatus] exit status for every release lookup
  * @param {string} [opts.releasesStderr] stderr for a failing release lookup
- * @param {string|null} [opts.registryDigest] digest the manifest HEAD reports
- *   (defaults to the Dockerfile's own pin, i.e. current); `null` omits the header
- * @param {number} [opts.tokenStatus] exit status of the Docker Hub token `curl`
- * @param {string} [opts.tokenStdout] body of the Docker Hub token response
- * @param {number} [opts.manifestStatus] exit status of the manifest HEAD `curl`
+ * @param {number} [opts.createStatus] exit status of `gh issue create`
+ * @param {string} [opts.createStderr] stderr of a failing `gh issue create`
+ * @param {number} [opts.editStatus] exit status of `gh issue edit`
  */
 function fakeSpawn({
   outdated = {},
   outdatedStatus,
   existing = [],
-  milestone = "v2.6.0",
+  listing,
+  listingStatus,
   releaseTags = [],
   releasesStatus,
   releasesStderr = "",
-  registryDigest = PINNED,
-  tokenStatus = 0,
-  tokenStdout = JSON.stringify({ token: "anon-token" }),
-  manifestStatus = 0,
+  createStatus = 0,
+  createStderr = "",
+  editStatus = 0,
 } = {}) {
   const calls = [];
   const fn = (cmd, args, opts) => {
     calls.push({ cmd, args, cwd: opts?.cwd, input: opts?.input });
-    if (cmd === "curl") {
-      const url = args[args.length - 1];
-      if (url.startsWith("https://auth.docker.io/token"))
-        return {
-          status: tokenStatus,
-          stdout: tokenStatus ? "" : tokenStdout,
-          stderr: tokenStatus ? "curl: (6) Could not resolve host" : "",
-        };
-      if (url.startsWith("https://registry-1.docker.io/v2/"))
-        return {
-          status: manifestStatus,
-          stdout: manifestStatus
-            ? ""
-            : [
-                "HTTP/1.1 200 OK",
-                "content-type: application/vnd.oci.image.index.v1+json",
-                ...(registryDigest
-                  ? [`Docker-Content-Digest: ${registryDigest}`]
-                  : []),
-                "",
-              ].join("\r\n"),
-          stderr: manifestStatus ? "curl: (22) 401 Unauthorized" : "",
-        };
-      throw new Error(`unexpected curl: ${url}`);
-    }
     if (cmd === "npm") {
       const payload = outdated[opts.cwd] ?? {};
       const found = Object.keys(payload).length > 0;
@@ -101,31 +115,34 @@ function fakeSpawn({
         stderr: outdatedStatus ? "ENOTFOUND registry.npmjs.org" : "",
       };
     }
-    if (args[0] === "issue" && args[1] === "list")
-      return { status: 0, stdout: JSON.stringify(existing), stderr: "" };
-    // MUST be tested before the milestone branch below: both are `gh api`,
-    // so matching on args[0] alone hands the release lookup the milestone
-    // string and the assertion silently checks nothing.
+    if (cmd !== "gh") throw new Error(`unexpected program: ${cmd}`);
+    // MUST be tested before the listing branch below: both are `gh api`, so
+    // matching on args[0] alone hands the release lookup the issue listing
+    // and the assertion silently checks nothing.
     if (args[0] === "api" && args.some((a) => a.includes("/releases")))
       return {
         status: releasesStatus ?? 0,
         stdout: releasesStatus ? "" : releaseTags.join("\n"),
         stderr: releasesStderr,
       };
-    if (args[0] === "api")
+    if (args[0] === "api" && args.some((a) => a.includes("/issues?")))
       return {
-        status: 0,
-        stdout: milestone ? `${milestone}\n` : "",
-        stderr: "",
+        status: listingStatus ?? 0,
+        stdout: listingStatus ? "" : JSON.stringify(listing ?? [existing]),
+        stderr: listingStatus ? "gh: Bad Gateway (HTTP 502)" : "",
       };
     if (args[0] === "issue" && args[1] === "create")
       return {
-        status: 0,
-        stdout: "https://github.com/o/r/issues/9\n",
-        stderr: "",
+        status: createStatus,
+        stdout: createStatus ? "" : "https://github.com/o/r/issues/9\n",
+        stderr: createStderr,
       };
     if (args[0] === "issue" && args[1] === "edit")
-      return { status: 0, stdout: "", stderr: "" };
+      return {
+        status: editStatus,
+        stdout: "",
+        stderr: editStatus ? "gh: Not Found (HTTP 404)" : "",
+      };
     throw new Error(`unexpected spawn: ${cmd} ${args.join(" ")}`);
   };
   fn.calls = calls;
@@ -306,28 +323,22 @@ test("staleActions ranks a SHA pin by its version comment, to the patch", () => 
 });
 
 test("buildIssueBody returns null when every install is up to date", () => {
-  assert.equal(
-    buildIssueBody([
-      { label: "root", packages: [] },
-      { label: "clients/web", packages: [] },
-    ]),
-    null,
-  );
+  assert.equal(buildIssueBody([{ label: "root", packages: [] }]), null);
 });
 
 test("buildIssueBody starts with the idempotency marker and skips empty installs", () => {
   const body = buildIssueBody([
-    { label: "root", packages: [] },
+    { label: "empty", packages: [] },
     {
-      label: "clients/web",
+      label: "root",
       packages: [
         { name: "zod", current: "3.0.0", wanted: "3.1.0", latest: "4.0.0" },
       ],
     },
   ]);
   assert.ok(body.startsWith(ISSUE_MARKER));
-  assert.ok(body.includes("### `clients/web`"));
-  assert.ok(!body.includes("### `root`"));
+  assert.ok(body.includes("### `root`"));
+  assert.ok(!body.includes("### `empty`"));
   assert.ok(body.includes("| `zod` | 3.0.0 | 3.1.0 | 4.0.0 |"));
 });
 
@@ -349,26 +360,19 @@ test("main throws when npm outdated exits with an undocumented status", () => {
   assert.equal(ghCall(spawn, "create"), undefined);
 });
 
-test("INSTALLS enrolls the root and every client install", () => {
-  // A client absent here is silently skipped by the monthly sweep — its
-  // client-only devDependencies would never show up in `npm outdated`.
+test("INSTALLS is the one root install", () => {
+  // This repository is one package. An install added here without a matching
+  // install step in the workflow would be swept over a tree that is not there.
   assert.deepEqual(
     INSTALLS.map((i) => i.dir),
-    [
-      ".",
-      "clients/web",
-      "clients/cli",
-      "clients/tui",
-      "clients/launcher",
-      "clients/mcpdo",
-    ],
+    ["."],
   );
 });
 
-test("main sweeps every install and files one milestoned issue", () => {
+test("main sweeps the install and files one issue with the three labels", () => {
   const spawn = fakeSpawn({
     outdated: {
-      "clients/web": {
+      ".": {
         zod: { current: "3.0.0", wanted: "3.1.0", latest: "4.0.0" },
       },
     },
@@ -381,8 +385,23 @@ test("main sweeps every install and files one milestoned issue", () => {
   );
   const create = ghCall(spawn, "create");
   assert.ok(create, "expected an issue to be created");
-  assert.deepEqual(create.args.slice(-2), ["--milestone", "v2.6.0"]);
-  assert.ok(create.args[create.args.indexOf("--body") + 1].includes("`zod`"));
+  assert.deepEqual(create.args.slice(0, 12), [
+    "issue",
+    "create",
+    "--repo",
+    "o/r",
+    "--title",
+    "chore(deps): monthly dependency refresh",
+    "--label",
+    "factory",
+    "--label",
+    "chore",
+    "--label",
+    "dependabot",
+  ]);
+  assert.ok(!create.args.includes("--milestone"));
+  assert.equal(create.args[create.args.length - 2], "--body");
+  assert.ok(create.args[create.args.length - 1].includes("`zod`"));
   assert.ok(log.some((l) => l.includes("filed")));
 });
 
@@ -391,7 +410,7 @@ test("main edits the existing issue instead of filing a duplicate", () => {
     outdated: {
       ".": { ajv: { current: "8.0.0", wanted: "8.1.0", latest: "8.1.0" } },
     },
-    existing: [{ number: 77, body: `${ISSUE_MARKER}\nstale` }],
+    existing: [sweepIssue(77, `${ISSUE_MARKER}\nstale`)],
   });
   const log = captureLog(() => main("o/r", spawn));
 
@@ -404,7 +423,7 @@ test("main edits the existing issue instead of filing a duplicate", () => {
 
 test("main clears a still-open issue once everything is current again", () => {
   const spawn = fakeSpawn({
-    existing: [{ number: 77, body: `${ISSUE_MARKER}\n| \`zod\` | 3.0.0 |` }],
+    existing: [sweepIssue(77, `${ISSUE_MARKER}\n| \`zod\` | 3.0.0 |`)],
   });
   const log = captureLog(() => main("o/r", spawn));
 
@@ -423,22 +442,6 @@ test("main is a true no-op when nothing is outdated and no issue is open", () =>
   assert.equal(ghCall(spawn, "edit"), undefined);
   assert.equal(ghCall(spawn, "create"), undefined);
   assert.ok(log.some((l) => l.includes("no-op")));
-});
-
-test("main says Incoming, not Todo, when it files without a milestone", () => {
-  const spawn = fakeSpawn({
-    outdated: {
-      ".": { ajv: { current: "8.0.0", wanted: "8.1.0", latest: "8.1.0" } },
-    },
-    milestone: null,
-  });
-  const log = captureLog(() => main("o/r", spawn));
-
-  const create = ghCall(spawn, "create");
-  assert.ok(!create.args.includes("--milestone"));
-  // Unmilestoned is unapproved; triage parks it in Incoming.
-  assert.ok(log.some((l) => l.includes("Incoming")));
-  assert.ok(!log.some((l) => l.includes("Todo")));
 });
 
 test("main refuses to run without a repo", () => {
@@ -510,9 +513,9 @@ test("buildClearedBody speaks for both halves of the sweep", () => {
   // npm-only wording here would assert an all-clear the sweep never checked.
   assert.match(body, /npm package/);
   assert.match(body, /uses:/);
-  // Must not claim every ref was verified: SHA- and branch-pinned refs are
-  // never ranked against a release (Copilot).
-  assert.match(body, /SHA or a branch/);
+  // Must not claim every ref was verified: a SHA pin with no version comment
+  // and a branch are never ranked against a release (Copilot).
+  assert.match(body, /commit SHA with no such comment, or a branch/);
 });
 
 test("main fails the sweep when a release lookup errors, rather than reporting no stale actions", () => {
@@ -576,145 +579,319 @@ test("main asks for release lists, not the designated latest release", () => {
   }
 });
 
-const DIGEST = `sha256:${"a".repeat(64)}`;
+// ---- written here ----
 
-test("parseDockerBaseImage reads the digest-pinned NODE_IMAGE arg", () => {
-  const dockerfile = [
-    "# syntax=docker/dockerfile:1",
-    `ARG NODE_IMAGE=node:22-slim@${DIGEST}`,
-    "FROM ${NODE_IMAGE} AS builder",
-  ].join("\n");
-  assert.deepEqual(parseDockerBaseImage(dockerfile), {
-    image: "node:22-slim",
-    repository: "library/node",
-    tag: "22-slim",
-    digest: DIGEST,
-  });
-});
+/** One outdated package at the root: enough for `main` to want an issue. */
+const BEHIND = {
+  ".": { ajv: { current: "8.0.0", wanted: "8.1.0", latest: "8.1.0" } },
+};
 
-test("parseDockerBaseImage reads the repo's own Dockerfile", () => {
-  // Pins the real file's shape: an edit that drops or reshapes the pin fails
-  // here, not first in the monthly run.
-  const base = parseDockerBaseImage(readFileSync(DOCKERFILE, "utf8"));
-  assert.equal(base.repository, "library/node");
-  assert.match(base.digest, /^sha256:[0-9a-f]{64}$/);
-});
-
-test("parseDockerBaseImage fails loudly when the pin is missing or reshaped", () => {
-  // Each of these would otherwise drop the base image out of the sweep
-  // silently and read as "current" forever.
-  assert.throws(
-    () => parseDockerBaseImage("FROM node:22-slim\n"),
-    /no `ARG NODE_IMAGE=`/,
-  );
-  assert.throws(
-    () => parseDockerBaseImage("ARG NODE_IMAGE=node:22-slim\n"),
-    /not an official Docker Hub/,
-  );
-  assert.throws(
-    () => parseDockerBaseImage(`ARG NODE_IMAGE=ghcr.io/o/node:22@${DIGEST}\n`),
-    /not an official Docker Hub/,
-  );
-});
-
-test("parseDigestHeader is case-insensitive and reads only the final response", () => {
-  const other = `sha256:${"c".repeat(64)}`;
-  const dump = [
-    "HTTP/1.1 307 Temporary Redirect",
-    `docker-content-digest: ${other}`,
-    "",
-    "HTTP/1.1 200 OK",
-    `Docker-Content-Digest: ${DIGEST}`,
-    "",
-  ].join("\r\n");
-  assert.equal(parseDigestHeader(dump), DIGEST);
-  assert.equal(parseDigestHeader("HTTP/1.1 200 OK\r\n"), null);
-  // A redirect's digest is not the final response's (Copilot).
-  assert.equal(
-    parseDigestHeader(
-      [
-        "HTTP/1.1 307 Temporary Redirect",
-        `docker-content-digest: ${other}`,
-        "",
-        "HTTP/1.1 200 OK",
-        "",
-      ].join("\r\n"),
-    ),
-    null,
-  );
-});
-
-test("buildIssueBody renders a Docker base image section with the bump line", () => {
-  const body = buildIssueBody([], [], {
-    image: "node:22-slim",
-    pinned: DIGEST,
-    current: NEWER,
-  });
-  assert.ok(body.startsWith(ISSUE_MARKER));
-  assert.ok(body.includes("### Docker base image"));
-  assert.ok(
-    body.includes(
-      `| \`node:22-slim\` | \`sha256:aaaaaaaaaaaa\` | \`sha256:bbbbbbbbbbbb\` |`,
-    ),
-  );
-  assert.ok(body.includes(`ARG NODE_IMAGE=node:22-slim@${NEWER}`));
-});
-
-test("buildClearedBody covers the base image too", () => {
-  assert.match(buildClearedBody("2026-11-05"), /base-image digest/);
-});
-
-test("main reports a stale base-image digest on its own", () => {
-  const spawn = fakeSpawn({ registryDigest: NEWER });
+test("main reports a stale action on its own, from this repo's workflow files", () => {
+  // The action half end to end: `main` reads the real `.github/workflows`,
+  // where every action is a SHA pin with a version comment, and a release far
+  // above any of them makes each one stale.
+  const spawn = fakeSpawn({ releaseTags: ["v999.0.0"] });
   captureLog(() => main("o/r", spawn));
   const create = ghCall(spawn, "create");
-  assert.ok(create, "a stale digest alone must file the tracking issue");
-  const body = create.args[create.args.indexOf("--body") + 1];
-  assert.ok(body.includes("### Docker base image"));
-  assert.ok(body.includes(`ARG NODE_IMAGE=node:22-slim@${NEWER}`));
+  assert.ok(create, "stale actions alone must file the tracking issue");
+  const body = create.args[create.args.length - 1];
+  assert.ok(body.includes("### GitHub Actions"));
+  assert.ok(body.includes("| `actions/checkout` | v"));
+  assert.ok(body.includes("| v999.0.0 |"));
 });
 
-test("main asks the registry for the multi-arch index, anonymously", () => {
-  const spawn = fakeSpawn();
-  const log = captureLog(() => main("o/r", spawn));
-  assert.ok(
-    log.some((l) => l.includes("no-op")),
-    "a current pin is not stale",
-  );
-
-  const curls = spawn.calls.filter((c) => c.cmd === "curl");
-  assert.equal(curls.length, 2);
-  const [token, head] = curls;
-  assert.match(
-    token.args.at(-1),
-    /^https:\/\/auth\.docker\.io\/token\?service=registry\.docker\.io&scope=repository:library\/node:pull$/,
-  );
-  assert.equal(
-    head.args.at(-1),
-    "https://registry-1.docker.io/v2/library/node/manifests/22-slim",
-  );
-  // A HEAD that accepts the index types; a single-platform answer would never
-  // match an index pin and would report stale every month.
-  assert.ok(head.args.includes("-fsSIL"));
-  assert.ok(head.args.includes(`Accept: ${INDEX_MEDIA_TYPES.join(", ")}`));
-  // The bearer token travels on stdin, never in argv.
-  assert.ok(!head.args.some((a) => a.includes("anon-token")));
-  assert.match(head.input, /Authorization: Bearer anon-token/);
-});
-
-test("main fails the sweep when the base-image lookup fails", () => {
-  // Each of these read as "no digest" would be indistinguishable from a
-  // current pin.
-  for (const [opts, pattern] of [
-    [{ tokenStatus: 6 }, /Docker Hub token request .* failed/],
-    [{ tokenStdout: "{}" }, /returned no token/],
-    [{ tokenStdout: "<html>" }, /returned no token/],
-    [{ manifestStatus: 22 }, /manifest lookup .* failed.*401/s],
-    [{ registryDigest: null }, /no Docker-Content-Digest header/],
+test("main starts npm and gh and nothing else", () => {
+  // The source's script also ran `curl` (the Docker half) and read
+  // milestones. Neither is here; the fake throws on both, and this says so.
+  for (const opts of [
+    {},
+    { outdated: BEHIND },
+    { outdated: BEHIND, existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)] },
+    { existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)] },
   ]) {
     const spawn = fakeSpawn(opts);
+    captureLog(() => main("o/r", spawn));
+    for (const call of spawn.calls) {
+      assert.ok(["npm", "gh"].includes(call.cmd), `started ${call.cmd}`);
+      assert.ok(!call.args.includes("--milestone"));
+      assert.ok(!call.args.some((a) => a.includes("milestones")));
+    }
+  }
+});
+
+// Addition A1: the lookup, and whose marker counts.
+
+test("main looks its issue up with the labelled REST listing, every page, not with issue search", () => {
+  const spawn = fakeSpawn();
+  captureLog(() => main("o/r", spawn));
+  const listings = spawn.calls.filter(
+    (c) => c.cmd === "gh" && c.args.some((a) => a.includes("/issues?")),
+  );
+  assert.equal(listings.length, 1);
+  assert.deepEqual(listings[0].args, [
+    "api",
+    "--paginate",
+    "--slurp",
+    "repos/o/r/issues?state=open&labels=dependabot&per_page=100",
+  ]);
+  assert.equal(ghCall(spawn, "list"), undefined);
+  assert.ok(!spawn.calls.some((c) => c.args.includes("--search")));
+});
+
+test("main finds its issue on a later page of the listing", () => {
+  const others = Array.from({ length: 100 }, (_, i) =>
+    sweepIssue(200 + i, "an alert issue, with another marker"),
+  );
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    listing: [others, [sweepIssue(77, `${ISSUE_MARKER}\nold`)]],
+  });
+  captureLog(() => main("o/r", spawn));
+  assert.equal(ghCall(spawn, "create"), undefined);
+  assert.equal(ghCall(spawn, "edit").args[2], "77");
+});
+
+test("a marker on an issue the automation did not write is not this sweep's issue", () => {
+  const body = `${ISSUE_MARKER}\nforged`;
+  const forgeries = {
+    "an outsider, no labels": sweepIssue(50, body, {
+      user: { login: "someone", type: "User" },
+      labels: [],
+    }),
+    "an outsider, even with the labels": sweepIssue(50, body, {
+      user: { login: "someone", type: "User" },
+    }),
+    "a human account with the automation's name": sweepIssue(50, body, {
+      user: { login: "github-actions", type: "User" },
+    }),
+    "another bot": sweepIssue(50, body, {
+      user: { login: "dependabot[bot]", type: "Bot" },
+    }),
+    "the automation, without the type label": sweepIssue(50, body, {
+      labels: [{ name: "factory" }, { name: "dependabot" }],
+    }),
+    "the automation, without the sweep's label": sweepIssue(50, body, {
+      labels: [{ name: "factory" }, { name: "chore" }],
+    }),
+    "no author at all": sweepIssue(50, body, { user: null }),
+  };
+  for (const [what, forged] of Object.entries(forgeries)) {
+    // Something is behind: the sweep must file its own issue, not edit this one.
+    const filing = fakeSpawn({ outdated: BEHIND, existing: [forged] });
+    captureLog(() => main("o/r", filing));
+    assert.equal(ghCall(filing, "edit"), undefined, `edited: ${what}`);
+    assert.ok(ghCall(filing, "create"), `did not file its own: ${what}`);
+
+    // Nothing is behind: the sweep must not "clear" someone else's issue.
+    const clean = fakeSpawn({ existing: [forged] });
+    const log = captureLog(() => main("o/r", clean));
+    assert.equal(ghCall(clean, "edit"), undefined, `cleared: ${what}`);
+    assert.equal(ghCall(clean, "create"), undefined);
+    assert.ok(log.some((l) => l.includes("no-op")));
+  }
+});
+
+test("the sweep's own issue is found behind a forged one", () => {
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    existing: [
+      sweepIssue(90, `${ISSUE_MARKER}\nforged`, {
+        user: { login: "someone", type: "User" },
+        labels: [],
+      }),
+      sweepIssue(77, `${ISSUE_MARKER}\nold`),
+    ],
+  });
+  captureLog(() => main("o/r", spawn));
+  assert.equal(ghCall(spawn, "create"), undefined);
+  assert.equal(ghCall(spawn, "edit").args[2], "77");
+});
+
+test("the marker must be the first thing in the body", () => {
+  for (const body of [
+    `intro\n${ISSUE_MARKER}`,
+    ` ${ISSUE_MARKER}`,
+    ISSUE_MARKER.slice(0, -1),
+    "",
+    null,
+    undefined,
+    7,
+  ]) {
+    const spawn = fakeSpawn({
+      outdated: BEHIND,
+      existing: [sweepIssue(77, body)],
+    });
+    captureLog(() => main("o/r", spawn));
+    assert.equal(ghCall(spawn, "edit"), undefined, JSON.stringify(body));
+    assert.ok(ghCall(spawn, "create"), JSON.stringify(body));
+  }
+});
+
+test("a pull request in the listing is never this sweep's issue", () => {
+  // The issues endpoint returns pull requests too. One that somehow carried
+  // the author, the labels and the marker is still not an issue to edit.
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    existing: [
+      sweepIssue(77, `${ISSUE_MARKER}\nold`, {
+        pull_request: { url: "https://api.github.com/repos/o/r/pulls/77" },
+      }),
+    ],
+  });
+  captureLog(() => main("o/r", spawn));
+  assert.equal(ghCall(spawn, "edit"), undefined);
+  assert.ok(ghCall(spawn, "create"));
+});
+
+test("the author check asks for the labels SWEEP_LABELS names, and the issue is filed with them", () => {
+  assert.deepEqual(ISSUE_LABELS, ["factory", "chore", "dependabot"]);
+  assert.deepEqual(SWEEP_LABELS, ["chore", "dependabot"]);
+  // An issue the sweep files must pass the sweep's own check on the next run.
+  for (const label of SWEEP_LABELS) assert.ok(ISSUE_LABELS.includes(label));
+  // The process label is not part of the check: its removal by a maintainer
+  // does not make the sweep file a second issue.
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    existing: [
+      sweepIssue(77, `${ISSUE_MARKER}\nold`, {
+        labels: SWEEP_LABELS.map((name) => ({ name })),
+      }),
+    ],
+  });
+  captureLog(() => main("o/r", spawn));
+  assert.equal(ghCall(spawn, "create"), undefined);
+  assert.equal(ghCall(spawn, "edit").args[2], "77");
+});
+
+test("main fails the sweep when the listing fails or is not a list of pages, and writes nothing", () => {
+  // A listing read as "no issue" would file a duplicate every month.
+  for (const [opts, pattern] of [
+    [{ listingStatus: 1 }, /issues\?state=open.*failed \(1\).*502/s],
+    [{ listing: { message: "Not Found" } }, /non-list response/],
+    [{ listing: [{ message: "Not Found" }] }, /non-list response/],
+  ]) {
+    const spawn = fakeSpawn({ outdated: BEHIND, ...opts });
     assert.throws(() => captureLog(() => main("o/r", spawn)), pattern);
     assert.equal(ghCall(spawn, "create"), undefined);
     assert.equal(ghCall(spawn, "edit"), undefined);
   }
+});
+
+// A write that fails.
+
+test("main throws when the issue cannot be created, as with a label that does not exist", () => {
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    createStatus: 1,
+    createStderr: "could not add label: 'chore' not found",
+  });
+  assert.throws(
+    () => captureLog(() => main("o/r", spawn)),
+    /gh issue create failed: could not add label: 'chore' not found/,
+  );
+});
+
+test("main throws when the issue cannot be edited", () => {
+  const spawn = fakeSpawn({
+    outdated: BEHIND,
+    existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)],
+    editStatus: 1,
+  });
+  assert.throws(
+    () => captureLog(() => main("o/r", spawn)),
+    /gh issue edit failed: .*404/,
+  );
+  assert.equal(ghCall(spawn, "create"), undefined);
+});
+
+// Addition A3: issue writes go through the paced writer.
+
+test("every issue write goes through the writer main is given, and no read does", () => {
+  const cases = {
+    create: { outdated: BEHIND },
+    edit: {
+      outdated: BEHIND,
+      existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)],
+    },
+    clear: { existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)] },
+    "no-op": {},
+  };
+  for (const [name, opts] of Object.entries(cases)) {
+    const spawn = fakeSpawn(opts);
+    const inside = [];
+    let writing = false;
+    const write = (fn) => {
+      writing = true;
+      const before = spawn.calls.length;
+      try {
+        return fn();
+      } finally {
+        writing = false;
+        inside.push(...spawn.calls.slice(before));
+      }
+    };
+    captureLog(() => main("o/r", spawn, write));
+    assert.equal(writing, false);
+    const writes = spawn.calls.filter(
+      (c) => c.cmd === "gh" && c.args[0] === "issue",
+    );
+    assert.deepEqual(inside, writes, `${name}: a write went round the writer`);
+    assert.equal(writes.length, name === "no-op" ? 0 : 1, name);
+  }
+});
+
+test("a run makes one write, so the one-second pause does not fire", () => {
+  for (const opts of [
+    { outdated: BEHIND },
+    { outdated: BEHIND, existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)] },
+    { existing: [sweepIssue(77, `${ISSUE_MARKER}\nold`)] },
+  ]) {
+    const pauses = [];
+    const spawn = fakeSpawn(opts);
+    captureLog(() =>
+      main(
+        "o/r",
+        spawn,
+        pacedWrites((ms) => pauses.push(ms)),
+      ),
+    );
+    assert.deepEqual(pauses, []);
+  }
+});
+
+// The issue text names this repository, and nothing of the source's.
+
+test("neither issue body carries the source's issue numbers, branch, repository or Docker half", () => {
+  const filed = buildIssueBody(
+    [
+      {
+        label: "root",
+        packages: [
+          { name: "zod", current: "3.0.0", wanted: "3.1.0", latest: "4.0.0" },
+        ],
+      },
+    ],
+    [{ action: "actions/cache", current: "v6", latest: "v7.0.0" }],
+  );
+  for (const body of [filed, buildClearedBody("2026-11-21")]) {
+    // `#NNNN` in an issue here would link to this repository's own numbers.
+    assert.doesNotMatch(body, /#\d/);
+    assert.doesNotMatch(body, /v2\/main/);
+    assert.doesNotMatch(body, /modelcontextprotocol/);
+    assert.doesNotMatch(body, /docker|base.image|client/i);
+  }
+  assert.ok(filed.includes(`](${PLACEMENT_DOC})`));
+  assert.equal(
+    PLACEMENT_DOC,
+    "https://github.com/NorthwoodsSentinel/mycelia-mcp/blob/main/AGENTS.md#dependency-placement",
+  );
+  assert.match(filed, /against `main`/);
+});
+
+test("the cleared body says a SHA pin with a version comment is covered", () => {
+  // Every action in this repository is pinned that way, and `parseActionRefs`
+  // ranks such a pin by its comment. The source's sentence said no SHA pin is
+  // covered, which here would read as "no action was checked".
+  const body = buildClearedBody("2026-11-21");
+  assert.match(body, /commit SHA followed by a `# vX\.Y\.Z` comment/);
 });

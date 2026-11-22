@@ -1,4 +1,68 @@
 #!/usr/bin/env node
+// The monthly dependency sweep: once a month it lists every npm package and
+// every workflow action that is behind, in ONE GitHub issue it files or edits.
+//
+// In this repo: the MCP Inspector's script (modelcontextprotocol/inspector at
+// commit 7df76f6eea9ea425891289333837878ebb31ae6a,
+// scripts/dependency-refresh.mjs, blob
+// cd04280227e82f8416c1218e842a1e3723181415), by copy then edit: the unchanged
+// file is this file's first commit here. The source's header follows this
+// block unchanged, so its "#NNNN" numbers are the source repository's issues,
+// and what it says of clients, a Dockerfile, `curl` and a milestone describes
+// the source, not this file. Comments further down that cite "(Copilot)" or
+// "five installs" are the source's too. Record: PROVENANCE.md, "Sweeps".
+// Design: docs/DESIGN-nor-673-sweeps.md, section 2.
+//
+// What differs from the source, and why:
+//
+//   1. ONE install. `INSTALLS` is the root only: this repository is one
+//      package, with no `clients/*`.
+//   2. The Docker half is removed (`DOCKERFILE`, `BASE_IMAGE_ARG`,
+//      `INDEX_MEDIA_TYPES`, `parseDockerBaseImage`, `parseDigestHeader`,
+//      `shortDigest`, `currentImageDigest`, `staleBaseImage`, and the base-image
+//      section of both issue bodies). There is no Dockerfile here, and
+//      `parseDockerBaseImage` throws without one. With it goes the script's only
+//      `curl` call: this file starts `npm` and `gh` and nothing else.
+//   3. The milestone lookup is removed (`currentMilestone`, the `--milestone`
+//      argument and the line logged without one). This repository has no
+//      milestones.
+//   4. The issue's labels are `factory`, `chore` and `dependabot`; the source's
+//      first label is `v2`. `factory` is this repository's process label.
+//   5. The issue text names this repository: its one branch, its rule and its
+//      `AGENTS.md`. The source's issue numbers are gone from it, because in an
+//      issue here `#NNNN` would point at this repository's own numbers. The
+//      text no longer says the alerts are swept daily: that sweep is not in this
+//      repository yet. The cleared body's sentence on SHA pins is corrected: a
+//      SHA pin with a `# vX.Y.Z` comment IS ranked (`parseActionRefs`), and
+//      every action here is pinned that way.
+//   6. ADDITION A1 — a marker is trusted only on what the automation wrote
+//      (`AGENTS.md`: "the sweep trusts a marker only on something the
+//      automation wrote"). The source's `findExistingIssue` takes any open
+//      issue whose body starts with the marker, found by issue search and
+//      capped at 10. Here it lists every open issue labelled `dependabot`
+//      through the REST listing, read to the last page (`ghPaginatedList`),
+//      drops pull requests, and keeps the issue that `isSweepAuthored` accepts
+//      (written by `github-actions[bot]`, carrying `SWEEP_LABELS`) and whose
+//      body starts with the marker. Search can lag an issue that was just
+//      created; the listing does not, and it is not capped.
+//   7. ADDITION A3 — every issue write goes through `pacedWrites`, which waits
+//      one second before any write after the first (`AGENTS.md`: "Pace bulk
+//      GitHub writes"). A run makes one write today, so the wait does not
+//      fire; see `scripts/lib/paced-writes.mjs`. `main` takes the writer as its
+//      third parameter, so a test can pass one whose pause is a recorder, or
+//      one that records which calls went through it.
+//
+// Unchanged: `npm outdated --json` and its exit-code rule (measured over a
+// tree installed by Bun: docs/DESIGN-nor-673-sweeps.md, section 3), the action
+// half, the marker, the title, and "never closes an issue, never opens a pull
+// request". (Addition A2, a `concurrency` block, is in the workflow file.)
+//
+// What this file can write: one issue's body, or one new issue, in the
+// repository `GITHUB_REPOSITORY` names, with the token `gh` finds in its
+// environment. It reads this checkout's workflow files, the npm registry
+// (through `npm outdated`) and the public release lists of the actions used.
+//
+// ---- the source's header, unchanged ----
 // Monthly dependency sweep (#2229), replacing Dependabot's VERSION-UPDATE PRs.
 //
 // A Dependabot version-update PR carries no issue and no board card — the same
@@ -53,39 +117,35 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ghPaginatedList, REPO_SLUG } from "./lib/gh.mjs";
 import { isMainModule } from "./lib/main-module.mjs";
+import { pacedWrites } from "./lib/paced-writes.mjs";
+import { isSweepAuthored } from "./lib/sweep-author.mjs";
 
 export const ISSUE_MARKER = "<!-- dependency-refresh:monthly-sweep -->";
 
 /** Installs to check, relative to the repo root, and their npm-outdated label. */
-export const INSTALLS = [
-  { dir: ".", label: "root" },
-  { dir: "clients/web", label: "clients/web" },
-  { dir: "clients/cli", label: "clients/cli" },
-  { dir: "clients/tui", label: "clients/tui" },
-  { dir: "clients/launcher", label: "clients/launcher" },
-  { dir: "clients/mcpdo", label: "clients/mcpdo" },
-];
+export const INSTALLS = [{ dir: ".", label: "root" }];
 
 /** Where the `uses:` refs this sweep checks live, relative to the repo root. */
 export const WORKFLOW_DIR = ".github/workflows";
 
-/** The Dockerfile whose digest-pinned base image this sweep checks (#2885). */
-export const DOCKERFILE = "Dockerfile";
-
-/** The build arg that carries the digest-pinned base image (#2833). */
-export const BASE_IMAGE_ARG = "NODE_IMAGE";
+/** The labels the tracking issue is filed with. */
+export const ISSUE_LABELS = ["factory", "chore", "dependabot"];
 
 /**
- * The media types a multi-arch INDEX is served as. The pin is the index
- * digest, so the lookup has to ask for an index: a request that accepts only
- * a single-platform manifest is answered with one platform's digest, which
- * never equals the pin and would report the image stale every month.
+ * The labels an open issue must carry, besides its author, before this sweep
+ * takes it for its own (addition A1). They are the two the source's own
+ * author check names for its upstream watch, in this sweep's spelling: the
+ * type label and the sweep's label. The process label is left out, as the
+ * source leaves its own out of that check: two labels already need write
+ * access to set, and each further one is one more way a relabel by a
+ * maintainer would make the sweep stop recognising its own issue.
  */
-export const INDEX_MEDIA_TYPES = [
-  "application/vnd.oci.image.index.v1+json",
-  "application/vnd.docker.distribution.manifest.list.v2+json",
-];
+export const SWEEP_LABELS = ["chore", "dependabot"];
+
+/** Where the issue text points for the rule on where a dependency goes. */
+export const PLACEMENT_DOC = `https://github.com/${REPO_SLUG}/blob/main/AGENTS.md#dependency-placement`;
 
 /**
  * Normalize one install's `npm outdated --json` output.
@@ -212,85 +272,13 @@ export function staleActions(refs, latestByAction) {
 }
 
 /**
- * Find the digest-pinned base image in a Dockerfile.
- *
- * Throws rather than returning `null` when the line is missing or carries no
- * digest: either means the pin #2833 put there is gone or reshaped, and a
- * sweep that quietly stopped checking it would read as "base image current"
- * forever. Only an official Docker Hub image is understood (`node:22-slim`,
- * i.e. `library/node`), since that is the only registry this lookup talks to;
- * anything else fails loudly for the same reason.
- *
- * @param {string} dockerfile raw contents of the Dockerfile
- * @returns {{image: string, repository: string, tag: string, digest: string}}
- *   `image` is the human form (`node:22-slim`), `repository` the registry path
- *   (`library/node`)
- */
-export function parseDockerBaseImage(dockerfile) {
-  const line = new RegExp(
-    `^\\s*ARG\\s+${BASE_IMAGE_ARG}=(\\S+)\\s*$`,
-    "m",
-  ).exec(dockerfile);
-  if (!line) {
-    throw new Error(
-      `${DOCKERFILE}: no \`ARG ${BASE_IMAGE_ARG}=\` line — the base-image digest pin (#2833) cannot be checked`,
-    );
-  }
-  const ref = line[1].replace(/^["']|["']$/g, "");
-  const match =
-    /^([a-z0-9][a-z0-9._-]*):([\w][\w.-]*)@(sha256:[0-9a-f]{64})$/.exec(ref);
-  if (!match) {
-    throw new Error(
-      `${DOCKERFILE}: \`${BASE_IMAGE_ARG}=${ref}\` is not an official Docker Hub \`<image>:<tag>@sha256:<digest>\` reference`,
-    );
-  }
-  const [, name, tag, digest] = match;
-  return {
-    image: `${name}:${tag}`,
-    repository: `library/${name}`,
-    tag,
-    digest,
-  };
-}
-
-/**
- * The `Docker-Content-Digest` header out of a raw HTTP header dump, or `null`.
- * Header names are case-insensitive, and `curl -I` follows redirects into a
- * dump holding several responses, so only the FINAL response's header counts.
- *
- * @param {string} headers raw header text from `curl -I`
- * @returns {string | null}
- */
-export function parseDigestHeader(headers) {
-  let digest = null;
-  for (const line of headers.split(/\r?\n/)) {
-    // Each status line starts a new response: a redirect's digest must not
-    // survive into a final response that omits the header (Copilot).
-    if (/^HTTP\//.test(line)) digest = null;
-    const match = /^docker-content-digest:\s*(sha256:[0-9a-f]{64})\s*$/i.exec(
-      line,
-    );
-    if (match) digest = match[1];
-  }
-  return digest;
-}
-
-/** A digest shortened for a table cell: `sha256:` plus the first 12 hex digits. */
-function shortDigest(digest) {
-  return digest.slice(0, "sha256:".length + 12);
-}
-
-/**
  * @param {Array<{label: string, packages: ReturnType<typeof parseOutdated>}>} installs
  * @param {ReturnType<typeof staleActions>} actions
- * @param {{image: string, pinned: string, current: string} | null} baseImage
- *   the Dockerfile base image, only when its pinned digest is stale
  * @returns {string | null} the issue body, or `null` when nothing is behind anywhere
  */
-export function buildIssueBody(installs, actions = [], baseImage = null) {
+export function buildIssueBody(installs, actions = []) {
   const withPackages = installs.filter((i) => i.packages.length > 0);
-  if (withPackages.length === 0 && actions.length === 0 && baseImage === null)
-    return null;
+  if (withPackages.length === 0 && actions.length === 0) return null;
 
   const sections = withPackages.map(({ label, packages }) => {
     const rows = packages
@@ -310,31 +298,11 @@ export function buildIssueBody(installs, actions = [], baseImage = null) {
     );
   }
 
-  if (baseImage !== null) {
-    sections.push(
-      [
-        "### Docker base image",
-        "",
-        "| Image | Pinned | Current |",
-        "| --- | --- | --- |",
-        `| \`${baseImage.image}\` | \`${shortDigest(baseImage.pinned)}\` | \`${shortDigest(baseImage.current)}\` |`,
-        "",
-        `The \`${DOCKERFILE}\`'s \`ARG ${BASE_IMAGE_ARG}\` pin is behind what \`${baseImage.image}\` points at now, so the image is missing whatever Node patch release or Debian security update moved the tag. Bump it to:`,
-        "",
-        "```",
-        `ARG ${BASE_IMAGE_ARG}=${baseImage.image}@${baseImage.current}`,
-        "```",
-        "",
-        "and keep the Node it carries inside the root `package.json` `engines` range.",
-      ].join("\n"),
-    );
-  }
-
   return [
     ISSUE_MARKER,
-    "Routine dependency refresh — `npm outdated`, a workflow `uses:` check and the Dockerfile's base-image digest, run against `v2/main` on a monthly schedule. This sweep replaces Dependabot's version-update PRs (#2229, #2235); its security-update PRs are off too (#2233), and the alerts they used to act on are swept into their own issues daily.",
+    "Routine dependency refresh — `npm outdated` and a workflow `uses:` check, run against `main` on a monthly schedule. Dependabot opens no pull requests in this repository; this sweep is what reports a package or an action that is behind.",
     "",
-    "This is a tracking issue, not a diff: pick what's worth bumping (`wanted` is the safe default; `latest` may cross a major and needs its own judgment call, especially for anything root-declared per [Dependency placement](https://github.com/modelcontextprotocol/inspector/blob/v2/main/AGENTS.md#dependency-placement)) and open a normal PR against `v2/main`.",
+    `This is a tracking issue, not a diff: pick what's worth bumping (\`wanted\` is the safe default; \`latest\` may cross a major and needs its own judgment call; see [Dependency placement](${PLACEMENT_DOC})). A bump then goes the way every change here does, to a pull request against \`main\`.`,
     "",
     ...sections,
     "",
@@ -352,10 +320,9 @@ export function buildIssueBody(installs, actions = [], baseImage = null) {
  * never checked, which is the same silent-all-clear shape the rest of this
  * file guards against.
  *
- * The sweep rewrites rather than closes: it deliberately takes no board
- * actions (see the workflow header), and closing an issue whose card a
- * maintainer has already moved would make the board claim work shipped that
- * this script cannot verify shipped. A maintainer closes it.
+ * The sweep rewrites rather than closes: closing says the work shipped, which
+ * this script cannot verify. A maintainer closes it. (The source's reason was
+ * its project board, which this repository does not have; the rule is kept.)
  *
  * @param {string} isoDate the sweep date, as `YYYY-MM-DD`
  * @returns {string}
@@ -363,11 +330,11 @@ export function buildIssueBody(installs, actions = [], baseImage = null) {
 export function buildClearedBody(isoDate) {
   return [
     ISSUE_MARKER,
-    `Everything this sweep can check is current as of ${isoDate} — no npm package is outdated at the root or in any client, no version-pinned workflow \`uses:\` ref is behind its action's highest release, and the Dockerfile's base-image digest matches what its tag points at.`,
+    `Everything this sweep can check is current as of ${isoDate} — no npm package is outdated at the root, and no workflow \`uses:\` ref that names its version is behind its action's highest release.`,
     "",
-    "Refs pinned to a commit SHA or a branch are deliberately **not** covered by that statement: neither can be ranked against a release tag, so this sweep says nothing about them either way.",
+    "A ref names its version when it is a version tag, or a commit SHA followed by a `# vX.Y.Z` comment. A commit SHA with no such comment, or a branch, is deliberately **not** covered by that statement: neither can be ranked against a release tag, so this sweep says nothing about them either way.",
     "",
-    "This issue was filed by an earlier run of the monthly sweep (#2229, #2235) and its tables are gone because nothing they listed is behind any more. Either it was bumped or the ranges caught up; nothing here is outstanding.",
+    "This issue was filed by an earlier run of the monthly sweep and its tables are gone because nothing they listed is behind any more. Either it was bumped or the ranges caught up; nothing here is outstanding.",
     "",
     "Safe to close. A later sweep that finds something behind will refile this body with fresh tables rather than open a duplicate.",
   ].join("\n");
@@ -493,142 +460,64 @@ function latestReleaseTag(action, spawn) {
 }
 
 /**
- * The index digest the base image's tag points at right now, from the Docker
- * Hub registry API — anonymous, so `GITHUB_TOKEN` is all the workflow needs.
+ * The open tracking issue an earlier run of this sweep filed, or `null`.
  *
- * `curl` rather than `fetch` so the lookup goes through the same injected
- * spawn as every other external call here and `main()` stays synchronous.
- * The pull token is handed to the second `curl` as a config file on stdin
- * (`-K -`), never in argv: it is an anonymous, read-only token, but a process
- * table is still not where a bearer token belongs.
+ * Addition A1 (see the header): the source searches issues for the marker and
+ * takes the first open one whose body starts with it, whoever wrote it. A
+ * marker is not evidence in a public repository: anyone can open an issue
+ * whose body starts with any text. So this lists every open issue labelled
+ * `dependabot` through the REST listing, to the last page, drops pull requests
+ * (the issues endpoint returns those too) and keeps the first that this
+ * automation wrote, carries `SWEEP_LABELS`, and starts with the marker.
  *
- * Every failure throws — a non-zero exit, an unparseable token response, a
- * response with no digest header. Any of those read as "no digest" would make
- * a broken lookup indistinguishable from a current pin.
+ * The listing is the one the source's daily alert sweep already uses. It is
+ * not issue search, which can lag behind an issue created a moment ago, and it
+ * has no cap. `ghPaginatedList` throws on a failed call and on an answer that
+ * is not a list of pages; it does not check a total, which this endpoint does
+ * not give (design, accepted limitations).
  *
- * @param {{repository: string, tag: string}} base from `parseDockerBaseImage`
- * @returns {string} `sha256:…`
- * @throws on any lookup failure
+ * @returns {{number: number, body: string} | null}
  */
-function currentImageDigest({ repository, tag }, spawn) {
-  const tokenUrl = `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repository}:pull`;
-  const auth = spawn("curl", ["-fsS", "--max-time", "60", tokenUrl], {
-    encoding: "utf8",
-  });
-  if (auth.error) throw auth.error;
-  if (auth.status !== 0) {
-    throw new Error(
-      `Docker Hub token request for ${repository} failed (exit ${auth.status}): ${(auth.stderr ?? "").trim()}`,
-    );
-  }
-  let token;
-  try {
-    token = JSON.parse(auth.stdout).token;
-  } catch {
-    token = undefined;
-  }
-  if (typeof token !== "string" || token === "") {
-    throw new Error(
-      `Docker Hub token request for ${repository} returned no token`,
-    );
-  }
-
-  const manifestUrl = `https://registry-1.docker.io/v2/${repository}/manifests/${tag}`;
-  const head = spawn(
-    "curl",
-    [
-      "-fsSIL",
-      "--max-time",
-      "60",
-      "-K",
-      "-",
-      "-H",
-      `Accept: ${INDEX_MEDIA_TYPES.join(", ")}`,
-      manifestUrl,
-    ],
-    { encoding: "utf8", input: `header = "Authorization: Bearer ${token}"\n` },
-  );
-  if (head.error) throw head.error;
-  if (head.status !== 0) {
-    throw new Error(
-      `manifest lookup for ${repository}:${tag} failed (exit ${head.status}): ${(head.stderr ?? "").trim()}`,
-    );
-  }
-  const digest = parseDigestHeader(head.stdout ?? "");
-  if (digest === null) {
-    throw new Error(
-      `manifest lookup for ${repository}:${tag} returned no Docker-Content-Digest header`,
-    );
-  }
-  return digest;
-}
-
-/**
- * The base image when its pinned digest is behind its tag, otherwise `null`.
- *
- * @returns {{image: string, pinned: string, current: string} | null}
- */
-function staleBaseImage(spawn) {
-  const base = parseDockerBaseImage(readFileSync(DOCKERFILE, "utf8"));
-  const current = currentImageDigest(base, spawn);
-  if (current === base.digest) return null;
-  return { image: base.image, pinned: base.digest, current };
-}
-
 function findExistingIssue(repo, spawn) {
-  const result = spawn(
-    "gh",
-    [
-      "issue",
-      "list",
-      "--repo",
-      repo,
-      "--state",
-      "open",
-      "--search",
-      ISSUE_MARKER,
-      "--json",
-      "number,body",
-      "--limit",
-      "10",
-    ],
-    { encoding: "utf8" },
+  const issues = ghPaginatedList(
+    spawn,
+    `repos/${repo}/issues?state=open&labels=dependabot&per_page=100`,
   );
-  if (result.status !== 0) {
-    throw new Error(`gh issue list failed: ${result.stderr}`);
-  }
-  const issues = JSON.parse(result.stdout || "[]");
-  return issues.find((i) => i.body?.startsWith(ISSUE_MARKER)) ?? null;
+  return (
+    issues.find(
+      (issue) =>
+        !issue?.pull_request &&
+        isSweepAuthored(issue, SWEEP_LABELS) &&
+        typeof issue.body === "string" &&
+        issue.body.startsWith(ISSUE_MARKER),
+    ) ?? null
+  );
 }
 
-function currentMilestone(repo, spawn) {
-  const result = spawn(
-    "gh",
-    [
-      "api",
-      `repos/${repo}/milestones`,
-      "--jq",
-      'map(select(.state=="open")) | sort_by(.due_on) | .[0].title // empty',
-    ],
-    { encoding: "utf8" },
-  );
-  if (result.status !== 0) {
-    throw new Error(`milestone lookup failed: ${result.stderr}`);
-  }
-  return result.stdout.trim() || null;
-}
-
-function editIssue(repo, number, body, spawn) {
-  const edit = spawn(
-    "gh",
-    ["issue", "edit", String(number), "--repo", repo, "--body", body],
-    { encoding: "utf8" },
+function editIssue(repo, number, body, spawn, write) {
+  const edit = write(() =>
+    spawn(
+      "gh",
+      ["issue", "edit", String(number), "--repo", repo, "--body", body],
+      { encoding: "utf8" },
+    ),
   );
   if (edit.status !== 0)
     throw new Error(`gh issue edit failed: ${edit.stderr}`);
 }
 
-export function main(repo = process.env.GITHUB_REPOSITORY, spawn = spawnSync) {
+/**
+ * @param {string} [repo] `owner/name`; defaults to `GITHUB_REPOSITORY`
+ * @param {typeof spawnSync} [spawn] every `npm` and `gh` call goes through it
+ * @param {<T>(write: () => T) => T} [write] what every issue write goes
+ *   through (addition A3); defaults to `pacedWrites()`, which waits a real
+ *   second before any write after the first (`lib/paced-writes.mjs`)
+ */
+export function main(
+  repo = process.env.GITHUB_REPOSITORY,
+  spawn = spawnSync,
+  write = pacedWrites(),
+) {
   if (!repo) throw new Error("repo not specified (GITHUB_REPOSITORY unset)");
 
   const installs = INSTALLS.map(({ dir, label }) => ({
@@ -644,17 +533,16 @@ export function main(repo = process.env.GITHUB_REPOSITORY, spawn = spawnSync) {
     ]),
   );
   const actions = staleActions(refs, latestByAction);
-  const baseImage = staleBaseImage(spawn);
 
   // Look the existing issue up BEFORE branching on `body`: the nothing-
   // behind case still has to reach an open issue to clear it.
   const existing = findExistingIssue(repo, spawn);
-  const body = buildIssueBody(installs, actions, baseImage);
+  const body = buildIssueBody(installs, actions);
 
   if (body === null) {
     if (!existing) {
       console.log(
-        "dependency-refresh: nothing outdated, no stale actions, base image current — no-op",
+        "dependency-refresh: nothing outdated, no stale actions — no-op",
       );
       return;
     }
@@ -663,6 +551,7 @@ export function main(repo = process.env.GITHUB_REPOSITORY, spawn = spawnSync) {
       existing.number,
       buildClearedBody(new Date().toISOString().slice(0, 10)),
       spawn,
+      write,
     );
     console.log(
       `dependency-refresh: nothing behind — cleared stale list on #${existing.number}`,
@@ -671,12 +560,11 @@ export function main(repo = process.env.GITHUB_REPOSITORY, spawn = spawnSync) {
   }
 
   if (existing) {
-    editIssue(repo, existing.number, body, spawn);
+    editIssue(repo, existing.number, body, spawn, write);
     console.log(`dependency-refresh: updated existing #${existing.number}`);
     return;
   }
 
-  const milestone = currentMilestone(repo, spawn);
   const args = [
     "issue",
     "create",
@@ -684,27 +572,14 @@ export function main(repo = process.env.GITHUB_REPOSITORY, spawn = spawnSync) {
     repo,
     "--title",
     "chore(deps): monthly dependency refresh",
-    "--label",
-    "v2",
-    "--label",
-    "chore",
-    "--label",
-    "dependabot",
+    ...ISSUE_LABELS.flatMap((label) => ["--label", label]),
     "--body",
     body,
   ];
-  if (milestone) args.push("--milestone", milestone);
 
-  const create = spawn("gh", args, { encoding: "utf8" });
+  const create = write(() => spawn("gh", args, { encoding: "utf8" }));
   if (create.status !== 0)
     throw new Error(`gh issue create failed: ${create.stderr}`);
-  if (!milestone) {
-    // Unmilestoned means unapproved, so triage sweeps it into `Incoming` — NOT
-    // `Todo`, which asserts a maintainer signed off (Copilot).
-    console.log(
-      "dependency-refresh: no open milestone — issue filed unmilestoned, will be swept into Incoming at next triage",
-    );
-  }
   console.log(`dependency-refresh: filed ${create.stdout.trim()}`);
 }
 
