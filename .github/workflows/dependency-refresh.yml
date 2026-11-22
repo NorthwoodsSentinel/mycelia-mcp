@@ -1,0 +1,123 @@
+# The monthly dependency sweep: on the 1st of each month it lists every npm
+# package and every workflow action that is behind, in ONE issue it files or
+# edits. No pull request is opened. Dependabot opens none here either
+# (AGENTS.md, "Dependency updates are issue-driven"), and this is what reports
+# a version that is behind in its place.
+#
+# In this repo: copied from modelcontextprotocol/inspector at commit
+# 7df76f6eea9ea425891289333837878ebb31ae6a,
+# .github/workflows/dependency-refresh.yml, by copy then edit (the unchanged
+# file is this file's first commit here). Record: PROVENANCE.md, "Sweeps".
+# Design: docs/DESIGN-nor-673-sweeps.md, sections 2 and 3. The script's own
+# edits are in the header of scripts/dependency-refresh.mjs.
+#
+# Unchanged from the source: the name, the two triggers and the cron slot, the
+# job's name, `runs-on`, Node 22, and the two environment values the script is
+# handed.
+#
+# Edits, each with its reason:
+#
+#   1. The checkout is this repository's one branch; the source's `ref:` names
+#      its second branch, which does not exist here. A scheduled run and a
+#      manual run both use the default branch's copy of this file.
+#   2. Every action is pinned to a commit SHA with its exact release, the pins
+#      `main.yml` carries. The source has `@v7` tags here. In this repository
+#      the pin is required in every job (AGENTS.md; `npm run
+#      verify:action-pins`).
+#   3. The install is `bun install --frozen-lockfile --ignore-scripts`, as in
+#      `main.yml`: this repository's lockfile is `bun.lock`, and there is no
+#      `package-lock.json`. The source's `npm install` and its `cache: npm` go,
+#      and so does its step that installs a pinned npm: that step's stated
+#      reason is a setting on install scripts, and this install runs none.
+#      `npm outdated` then reads the tree Bun installed (measured: the design
+#      note, section 3). Without the install it answers with one entry and a
+#      normal exit code, so the install step is not optional.
+#   4. `persist-credentials: false` on the checkout, as in `main.yml`: nothing
+#      here pushes.
+#   5. `timeout-minutes`, which every job here declares (AGENTS.md). The source
+#      has none on this job.
+#   6. The permissions are on the JOB; the workflow's own are `contents: read`.
+#      The source grants `issues: write` to the whole workflow. With one job
+#      the grant reaches the same steps; stated on the job, it does not reach
+#      a job added later.
+#   7. ADDITION A2, a `concurrency` block. The source has it on its daily
+#      sweep and not on this one. The reason is beside the block.
+#   8. Three step names no longer name the source's branch, its client
+#      installs or its base image. This header.
+#
+# What the job holds: `GITHUB_TOKEN` with `contents: read` and `issues: write`
+# in this repository, for the length of the job. No other secret is named. No
+# model runs. It never runs a pull request's code: its triggers are the
+# schedule and a manual run, and a manual run needs write access.
+#
+# What it needs that is not in this file, and is the owner's to create: the
+# labels `chore` and `dependabot`. The script files its issue with `factory`,
+# `chore` and `dependabot`; while one of them is missing, `gh issue create`
+# fails, the script throws and the run is red.
+#
+# The issue is filed by `github-actions[bot]`. That, with the labels, is how
+# the next run knows the issue is its own (scripts/lib/sweep-author.mjs).
+name: Dependency Refresh
+
+on:
+  schedule:
+    - cron: "23 6 1 * *" # 06:23 UTC on the 1st of every month
+  workflow_dispatch:
+
+# The lookup of the sweep's own issue is a read-before-write, not an atomic
+# one, and nothing stops a manual run from starting while the scheduled run is
+# still going. Two overlapping runs would both see no open issue and both file
+# one, which is the duplicate the marker exists to prevent. (The source's words
+# for this, on its daily sweep: "The marker check is a read-before-write, not
+# an atomic one".) `cancel-in-progress: false` because the queued run must
+# WAIT and then read the state the first run wrote; cancelling it would drop a
+# sweep instead.
+concurrency:
+  group: dependency-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-sweep:
+    runs-on: ubuntu-latest
+    # PROVISIONAL: no run of this workflow had been observed when this was
+    # written, and the source declares no timeout on this job to take a value
+    # from. One run is an install, one `npm outdated`, one release listing per
+    # action used, and one or two issue calls. 5 minutes is a hung-job guard,
+    # not a flake remedy; re-size it from this repository's scheduled runs,
+    # with the range, as AGENTS.md requires (Test-gate timeouts).
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.x"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Keep this version equal to CI_BUN_VERSION in main.yml, which states
+          # why one Bun is pinned (the source's pattern for its npm pin).
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        # From bun.lock exactly, and without running any dependency's install
+        # script: `npm outdated` needs the installed tree and nothing else.
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run the dependency sweep (npm packages + workflow actions)
+        run: node scripts/dependency-refresh.mjs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}

@@ -16,8 +16,9 @@
  * real protection with it.
  *
  * The second half runs the parser over the repository's ACTUAL workflow files
- * (`main.yml` and `dco.yml` today). It fails the moment a workflow invokes a
- * `local:*` script, and it fails if it finds no workflow file to read.
+ * (`main.yml`, `dco.yml`, `codeql.yml` and `dependency-refresh.yml` today). It
+ * fails the moment a workflow invokes a `local:*` script, and it fails if it
+ * finds no workflow file to read.
  *
  * Run by `npm run test:scripts`, which names this file by path: `node --test`
  * exits 0 on a glob that matches nothing.
