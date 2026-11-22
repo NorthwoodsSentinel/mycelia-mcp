@@ -102,21 +102,33 @@
 //      lacking its stated output buffer.
 //  13. What `gh` hands back is checked before it is acted on, and a failed
 //      check throws. The alert listing: each entry must be an object in the
-//      state the listing was asked for (`open`) that names its package, its
-//      manifest and its advisory, because an issue is cleared when its
-//      advisory is ABSENT from this listing, and an entry that cannot be
-//      keyed is an alert the run cannot account for; and no alert (one
-//      advisory's one range on one package in one manifest) may be listed
-//      twice. The issue listing and each comment listing: no pages at all
-//      throws (`ghPaginatedList`), and so does an entry that is not an
-//      object or that does not state its author's login and account type.
+//      state the listing was asked for (`open`) that states its package, its
+//      ecosystem, its manifest, its advisory, its vulnerable range and its
+//      patched version (or `null` for none yet). An issue is cleared when its
+//      advisory is ABSENT from this listing, so an entry that cannot be keyed
+//      is an alert the run cannot account for; and the source's grouping has
+//      a default for each of the others that turns a missing field into an
+//      answer ("not npm", "every version", "no patch yet"). The package, the
+//      advisory id and the patched version must also be free of the
+//      characters the markers are split on, or the next run could not read
+//      its own marker back. No alert (one advisory's one range on one
+//      package in one manifest) may be listed twice. The issue listing and
+//      each comment listing: no pages at all throws (`ghPaginatedList`), and
+//      so does an entry that is not an object or that does not state its
+//      author's login and account type; an issue entry must also state its
+//      labels as a list of named labels.
 //      An issue this sweep takes for its own must have a positive integer
 //      `number`, the one field of the listing that reaches `gh` as an
 //      argument of its own, and must state its body, where the marker is
 //      read; a comment of its own must state its body too. Six of these
 //      checks answer the review model's attack cases
 //      (`scripts/dependabot-alerts-attack.test.mjs`, cases 1 to 4, 7 and
-//      8). The setting, the alert listing and the issue
+//      8), and the checks on an alert's ecosystem, range, patched version
+//      and marker characters and on an issue's labels answer its audit of
+//      the pull request, round 1. NOT checked, and rendered as the listing
+//      gives them: an alert's severity, summary, scope and URL. None of them
+//      decides anything; each is text in an issue a person reads. The
+//      setting, the alert listing and the issue
 //      listing are all read before the first write, so a failure in any of
 //      them leaves every issue as it was. A comment listing is read just
 //      before the one comment it guards; a failure there stops the run with
@@ -271,6 +283,13 @@ export const SWEEP_LABELS = ["chore", "dependabot"];
 
 const MARKER_RE =
   /^<!-- dependabot-alerts: pkg=(.+?); manifest=(.+?); fixed=(.+?); ghsas=(.+?) -->/;
+
+/**
+ * What a value written into a marker may hold: anything but white space, a
+ * comma, a semicolon and an angle bracket, the characters the two markers are
+ * split on. Checked on each alert before anything is grouped (`openAlerts`).
+ */
+const MARKER_SAFE_RE = /^[^\s,;<>]+$/;
 
 /** Marker on the comment that announces newly-seen advisories, keyed by GHSA. */
 const COMMENT_MARKER_RE = /^<!-- dependabot-alerts:added (.+?) -->/;
@@ -975,21 +994,45 @@ function openAlerts(repo, spawn) {
   // grouping would drop it without a word (the review model's attack cases 1
   // and 2: an entry with no `state`, or with another, was dropped, and the
   // issue that tracked it was cleared as "fixed or dismissed").
+  //
+  // And every field a decision rests on has to be there (the pull request's
+  // audit, round 1). Each of these has a default further down, in the
+  // source's grouping, that turns a missing field into an answer:
+  //   - no `ecosystem` reads as "not npm", and the alert is skipped with the
+  //     run green;
+  //   - no vulnerable range reads as "every version", and an issue is filed
+  //     for a copy that is not exposed;
+  //   - a missing `first_patched_version` reads as "no patch yet", and the
+  //     alert is dropped. `null` is the endpoint's real answer for that, so
+  //     `null` is accepted and a missing field is not.
+  // The package, the advisory id and the patched version also go into the
+  // marker, which is a line of text split on `; `, `,` and ` -->`. A value
+  // holding white space, a comma, a semicolon or an angle bracket would write
+  // a marker the next run cannot read back, and that run would file the same
+  // issue again. No npm name, version or advisory id holds one.
   const alerts = pages.flat();
   const named = (value) => typeof value === "string" && value !== "";
+  const markerSafe = (value) => named(value) && MARKER_SAFE_RE.test(value);
   const seen = new Set();
   for (const alert of alerts) {
+    const patched = isRecord(alert)
+      ? alert.security_vulnerability?.first_patched_version
+      : undefined;
     if (
-      alert === null ||
-      typeof alert !== "object" ||
-      Array.isArray(alert) ||
+      !isRecord(alert) ||
       alert.state !== "open" ||
-      !named(alert.dependency?.package?.name) ||
+      !markerSafe(alert.dependency?.package?.name) ||
+      !named(alert.dependency?.package?.ecosystem) ||
       !named(alert.dependency?.manifest_path) ||
-      !named(alert.security_advisory?.ghsa_id)
+      !markerSafe(alert.security_advisory?.ghsa_id) ||
+      !named(alert.security_vulnerability?.vulnerable_version_range) ||
+      !(
+        patched === null ||
+        (isRecord(patched) && markerSafe(patched.identifier))
+      )
     ) {
       throw new Error(
-        `dependabot-alerts: the alert listing held an entry that is not an open alert naming its package, its manifest and its advisory — ${untouched}`,
+        `dependabot-alerts: the alert listing held an entry that is not an open alert stating its package, ecosystem, manifest, advisory, vulnerable range and patched version in a usable form — ${untouched}`,
       );
     }
     // One advisory's one vulnerable range, on one package in one manifest, is
@@ -1001,7 +1044,7 @@ function openAlerts(repo, spawn) {
       alert.dependency.package.name,
       alert.dependency.manifest_path,
       alert.security_advisory.ghsa_id,
-      alert.security_vulnerability?.vulnerable_version_range ?? null,
+      alert.security_vulnerability.vulnerable_version_range,
     ]);
     if (seen.has(identity)) {
       throw new Error(
@@ -1126,10 +1169,11 @@ function authorOf(entry, path) {
  *
  * The listing goes through `ghPaginatedList`, which throws on a failed call,
  * on an answer that is not a list of pages and on no pages at all.
- * Four checks are made here, and each throws: an entry that is not an object
+ * Five checks are made here, and each throws: an entry that is not an object
  * (skipped as "not mine", it would let a malformed answer stand for "no issue
  * of mine is open", and a duplicate would be filed); an entry that does not
- * state its author in full (`authorOf`); an own issue whose `number` is not a
+ * state its author in full (`authorOf`), or its labels as a list of named
+ * labels; an own issue whose `number` is not a
  * positive integer (that field is handed to `gh issue edit` and
  * `gh issue comment` as an argument of its own, and is put into an API path,
  * so nothing `gh` could read as an option, and nothing but a number, may get
@@ -1148,6 +1192,21 @@ function openDependabotIssues(repo, spawn) {
       );
     }
     authorOf(issue, path);
+    // The other half of the author check reads the labels. The endpoint
+    // states them on every issue, as a list of objects with a name. An entry
+    // with no list, or with one of another shape, is a short answer: read as
+    // "no labels", the sweep's own issue would count as someone else's and
+    // its bump would be filed again (the pull request's audit, round 1).
+    if (
+      !Array.isArray(issue.labels) ||
+      !issue.labels.every(
+        (label) => isRecord(label) && typeof label.name === "string",
+      )
+    ) {
+      throw new Error(
+        `unexpected response from ${path}: an entry that does not state its labels as a list of named labels`,
+      );
+    }
   }
   const own = issues.filter(
     (issue) => !issue.pull_request && isSweepAuthored(issue, SWEEP_LABELS),

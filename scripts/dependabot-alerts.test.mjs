@@ -2290,7 +2290,7 @@ test("an alert entry that cannot be keyed stops the run before anything is touch
         status: 0,
         stdout: JSON.stringify([[alert({ ghsa: "GHSA-b" }), entry]]),
       },
-      /held an entry that is not an open alert naming its package, its manifest and its advisory/,
+      /held an entry that is not an open alert stating its package, ecosystem, manifest, advisory, vulnerable range and patched version in a usable form/,
     );
   }
 });
@@ -2785,4 +2785,129 @@ test("an alert that is not npm is logged and does not fail the run", () => {
   );
   assert.deepEqual(issueWrites(spawn), []);
   assert.ok(log.some((l) => l.includes("raise it by hand: GHSA-act")));
+});
+
+// --- edit 13, as the pull request's audit left it (round 1) --------------------
+
+test("an alert missing a field a decision rests on stops the run before anything is touched", () => {
+  // Each of these has a default in the source's grouping that turns the
+  // missing field into an answer: "not npm" (skipped, run green), "every
+  // version" (an issue for a copy that is not exposed), "no patch yet"
+  // (dropped).
+  const without = (edit) => {
+    const entry = alert({ ghsa: "GHSA-a" });
+    edit(entry);
+    return entry;
+  };
+  for (const entry of [
+    without((a) => delete a.dependency.package.ecosystem),
+    without((a) => (a.dependency.package.ecosystem = "")),
+    without((a) => (a.dependency.package.ecosystem = 7)),
+    without((a) => delete a.security_vulnerability.vulnerable_version_range),
+    without((a) => (a.security_vulnerability.vulnerable_version_range = "")),
+    without((a) => delete a.security_vulnerability.first_patched_version),
+    without((a) => (a.security_vulnerability.first_patched_version = "3.1.6")),
+    without((a) => (a.security_vulnerability.first_patched_version = {})),
+    without(
+      (a) => (a.security_vulnerability.first_patched_version.identifier = 3),
+    ),
+    without((a) => delete a.security_vulnerability),
+  ]) {
+    assertListingFailureTouchesNothing(
+      {
+        status: 0,
+        stdout: JSON.stringify([[alert({ ghsa: "GHSA-b" }), entry]]),
+      },
+      /not an open alert stating its package, ecosystem, manifest, advisory, vulnerable range and patched version in a usable form/,
+    );
+  }
+});
+
+test("an alert with no patch yet states so with null, and is still not filed", () => {
+  // `null` is the endpoint's answer for "no patched version". It is not a
+  // short entry: the run goes on, files nothing for it, and leaves its issue.
+  const unpatched = alert({ ghsa: "GHSA-a" });
+  unpatched.security_vulnerability.first_patched_version = null;
+  const spawn = fakeSpawn({ alertPages: [[unpatched]] });
+  inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+  assert.deepEqual(issueWrites(spawn), []);
+});
+
+test("a value that would break a marker stops the run, so no issue is filed that the next run cannot recognise", () => {
+  // The markers are lines of text split on "; ", "," and " -->". The source
+  // wrote any value into them; a run that filed with one of these could not
+  // read its own marker back and would file the same issue every day.
+  const cases = [
+    { ghsa: "GHSA-a\nGHSA-b" },
+    { ghsa: "GHSA-a,GHSA-b" },
+    { ghsa: "GHSA-a -->" },
+    { ghsa: "GHSA a" },
+    { ghsa: "GHSA-a", pkg: "fast-uri; manifest=x" },
+    { ghsa: "GHSA-a", pkg: "fast uri" },
+    { ghsa: "GHSA-a", fixed: "3.1.6; ghsas=GHSA-z" },
+    { ghsa: "GHSA-a", fixed: "3.1.6\n" },
+    { ghsa: "GHSA-a", fixed: "<3.1.6>" },
+  ];
+  for (const fields of cases) {
+    assertListingFailureTouchesNothing(
+      { status: 0, stdout: JSON.stringify([[alert(fields)]]) },
+      /in a usable form/,
+    );
+  }
+
+  // What real names, ids and versions hold passes: a scope, a slash, a
+  // prerelease, build metadata. Filed once, the issue is recognised again.
+  const real = alert({
+    ghsa: "GHSA-5jgf-7c3w-x8q2",
+    pkg: "@scope/fast-uri.js_x",
+    fixed: "3.1.6-rc.1+build.5",
+    range: ">= 3.0.0, < 3.1.6-rc.1",
+  });
+  const lock = { "bun.lock": lockWith("@scope/fast-uri.js_x", "3.1.5") };
+  const first = fakeSpawn({ alertPages: [[real]] });
+  inTempRepo(lock, () => captureLog(() => main("o/r", first)));
+  const create = ghCall(first, "create");
+  assert.ok(create, "the bump is filed");
+
+  const second = fakeSpawn({
+    alertPages: [[real]],
+    issues: [
+      {
+        number: 41,
+        title: create.args[create.args.indexOf("--title") + 1],
+        body: create.args[create.args.indexOf("--body") + 1],
+      },
+    ],
+  });
+  const log = inTempRepo(lock, () => captureLog(() => main("o/r", second)));
+  assert.deepEqual(issueWrites(second), []);
+  assert.ok(log.some((l) => l.includes("#41 is up to date")));
+});
+
+test("an issue entry that does not state its labels as a list of named labels stops the run", () => {
+  // Read as "no labels", the sweep's own issue would count as someone else's
+  // and its bump would be filed again.
+  for (const labels of [
+    undefined,
+    null,
+    "chore,dependabot",
+    { name: "chore" },
+    ["chore", "dependabot"],
+    [{ name: "chore" }, null],
+    [{ name: "chore" }, { id: 1 }],
+  ]) {
+    const own = { ...asSweepIssue(filedIssue()), labels };
+    if (labels === undefined) delete own.labels;
+    assertIssueListingStopsTheRun(
+      { status: 0, stdout: JSON.stringify([[own]]) },
+      /an entry that does not state its labels as a list of named labels/,
+    );
+    // Someone else's entry is held to the same shape: a listing is whole or
+    // it is not.
+    const foreign = { ...own, user: { login: "mallory", type: "User" } };
+    assertIssueListingStopsTheRun(
+      { status: 0, stdout: JSON.stringify([[foreign]]) },
+      /an entry that does not state its labels as a list of named labels/,
+    );
+  }
 });
