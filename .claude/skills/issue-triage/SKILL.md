@@ -35,11 +35,23 @@ the audit.** Pass 2 is a human judgment call and is never done unprompted.
 
 For each untriaged ticket in `Backlog`:
 
-1. Apply the **process label** `factory`, the **owner label** `agent:<name>`
-   **and the type label** (`bug` / `enhancement` / `documentation` / `chore` /
-   `question` — see `/issue-create` for the table). A ticket opened by hand may
-   carry none of them, so all three are applied here, with the additive form in
-   `/board-ops` ("Edit labels"): `labels` replaces the whole set. When nothing
+**First, look for the process label `factory`. A ticket without it is left
+wholly untouched: no label, no score, no comment.** `AGENTS.md` sets that label
+"at create time, never by backfilling", so pass 1 does not add it, and whether
+the ticket joins this process is the owner's to rule. Until the owner rules,
+nothing else here is this skill's to do to it either: labelling or scoring it
+would treat it as tracked by a process nobody put it in. Name it in the run's
+report. It stays untriaged by the test above, and is reported again on every
+run until the owner rules. (The source applies its own process label when it
+sweeps an issue in. This is a departure from it, for that rule.)
+
+For a ticket that carries `factory`:
+
+1. Apply the **type label** (`bug` / `enhancement` / `documentation` / `chore` /
+   `question` — see `/issue-create` for the table) **and the owner label**
+   `agent:<name>`, with the additive form in
+   `/board-ops` ("Edit labels"): `labels` replaces the whole set. A ticket
+   opened by hand may carry neither. When nothing
    on the ticket says which agent carries it, leave the owner label off and
    name the ticket in the run's report: that is not the triager's to pick.
 2. Leave the state at **`Backlog`**.
@@ -50,10 +62,21 @@ For each untriaged ticket in `Backlog`:
    `Backlog` is precisely what marks it as awaiting review.
 
 **The one exception is an untriaged ticket that is already past `Backlog`.**
-Someone recorded the approval and only the triage is missing, so label and score
-it where it stands, keeping its state. Otherwise triage would silently un-approve
-work the owner had already approved. The `Backlog` listing does not show such a
-ticket; the audit below does.
+Read its `stateHistory` first (`get_issue`), because being past `Backlog` is not
+proof of approval:
+
+- **`Todo` is in its history.** Someone recorded the approval and only the
+  triage is missing, so label and score it where it stands, keeping its state.
+  Otherwise triage would silently un-approve work the owner had already
+  approved.
+- **`Todo` is not in its history.** Nobody recorded an approval. Label and score
+  it where it stands, **without the approval bonus**, keep its state, and name
+  it in the run's report: it is the audit's approval row, and whether it stays
+  where it is or goes back is the owner's.
+
+The process-label rule above holds for both kinds: a ticket without `factory`
+is reported and left untouched, wherever it stands. The `Backlog` listing shows
+neither kind; the audit below does.
 
 ### Finding the untriaged ones
 
@@ -80,8 +103,13 @@ taken by hand:
   no project for this repository, and a `query: "mycelia-mcp"` search
   returns other repositories' tickets too (both read 2026-11-21). A ticket is
   in scope only when it says so itself: its title or description names
-  `mycelia-mcp` as the thing to change. When that is not plain, leave the
-  ticket exactly as it is and name it in the run's report. Labelling or scoring
+  `mycelia-mcp` as the thing to change. **A ticket that names no repository at
+  all is not thereby out of scope:** `/issue-create` does not require the name,
+  so a ticket filed through this repository's own procedure can lack it.
+  Whenever scope is not plain, and that case is one, leave the
+  ticket exactly as it is and name it in the run's report, with the count of
+  such tickets on a line of its own: they were read and neither triaged nor
+  audited, and the report must not read as covering them. Labelling or scoring
   it from here would mean editing another effort's tracking.
 
 ### The outside GitHub issues: list them, and stop
@@ -158,7 +186,7 @@ someone can argue with later.
 evidence that the two axes may have undercounted:
 
 - Carries the `bug` label, or is a `[SEC]` ticket (`/security-advisory`)
-- Already in `Todo` or past it — i.e. **already approved**. This is the *re-scoring*
+- Already in `Todo`, or past it **with `Todo` in its state history** — i.e. **already approved**. A ticket past `Backlog` that never passed through `Todo` does not earn it. This is the *re-scoring*
   case: a ticket being scored in a pass-1 triage is in `Backlog` by rule, so
   it never earns this one. If you find yourself applying it to every ticket in a
   batch, `Todo` is being used as a formality rather than as approval, and
@@ -263,13 +291,15 @@ count means the tracker contradicts a rule, not that the rule needs revisiting.
 
 | Check | Invariant | Fix |
 | --- | --- | --- |
-| No `factory` label | Every ticket carries the process label | Add it — `/board-ops`, "Edit labels" |
+| No `factory` label | Every ticket carries the process label | Report it, and apply no other row's fix to it. The label is set at create time, never by backfilling (`AGENTS.md`); whether the ticket joins this process is the owner's |
 | Not exactly one type label | Every ticket carries **exactly one** of the five types, and neither retired label (`Feature`, `Improvement`) | Classify it, or remove the extra |
 | Not exactly one owner label | Every ticket carries **exactly one** `agent:<name>` | Add the missing one, or remove the extra; when nothing says who carries it, report it |
 | No Priority | Every ticket is prioritized | Score it with the rubric |
+| Open, past `Backlog`, no recorded score | Every open ticket's Priority has its arithmetic on the ticket ("Recording the score") | Score it where it stands — pass 1, the exception |
 | Past `Backlog` with no `Todo` in its history | Everything past Backlog ⇔ approved | Claims an approval nobody made: report it. The owner approves it or sends it back; neither move is an agent's |
 | `Done`, not shipped | **Done means the work shipped** | Set it to `Canceled` or `Duplicate` — `/board-ops` |
-| Shipped, but not `Done` | A merged PR whose first line is `Closes NOR-<n>` ⇒ that ticket is `Done` | Close out — `/pr-flow`, step 8 |
+| Shipped, but not `Done` | A PR merged into `main` whose first line is `Closes NOR-<n>`, with its merge commit on `origin/main` ⇒ that ticket is `Done` | Close out — `/pr-flow`, step 8. The audit only lists the candidate: the move is made through the `Done` check in `/board-ops` ("Move a state"), which reads the PR's base and its merge commit again |
+| A parent, still open, whose sub-issues are all closed | A parent whose last sub-issue closed is `Done` | The parent case of the `Done` check in `/board-ops`: at least one sub-issue, and every one `Done`, `Canceled` or `Duplicate` |
 
 The source's script (`scripts/board-audit.mjs`, inspector#2558) prints
 `<count>\t<check>\t<first offenders>` for every invariant in its table,
@@ -281,12 +311,16 @@ check read: `0` offenders over `0` tickets is not a pass.
 ```
 list_issues  team: "Northwoods-Sentinel"  state: "<state>"   # Backlog, Todo, In Progress, In Review: each to the end
 list_issues  team: "Northwoods-Sentinel"  state: "Done"  completedAt: "<start of the period audited>"
+list_issues  team: "Northwoods-Sentinel"  state: "<state>"  updatedAt: "<start of the period audited>"   # Canceled, Duplicate: closed too, read for the closed-without-Priority count
 get_issue    id: "NOR-<n>"                                    # labels, priority, stateHistory
+list_comments  issueId: "NOR-<n>"                             # each open ticket past Backlog: a **Triage:** comment? every page
+list_issues  parentId: "NOR-<n>"                              # each open ticket that has sub-issues: every page, every state
 ```
 
 ```sh
-gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --limit 200 \
-  --json number,body,mergedAt        # exactly 200 back is incomplete: raise the limit
+gh pr list -R NorthwoodsSentinel/mycelia-mcp --state merged --base main --limit 200 \
+  --json number,body,mergedAt,baseRefName,mergeCommit   # exactly 200 back is incomplete: raise the limit
+git fetch origin && git merge-base --is-ancestor <mergeCommit> origin/main   # per candidate
 ```
 
 Dropped from the source's twelve rows, because what each checks does not exist
@@ -295,7 +329,8 @@ version line); non-Issue items and the advisory-draft row (a ticket is the only
 kind of item, and a `[SEC]` ticket is an ordinary one that every row reads); no
 Status (a ticket always has a state); `Incoming` with a milestone (approval
 here is the state itself, so no second field can disagree with it). The version
-label row became the `factory` row, and the owner label row is this repo's.
+label row became the `factory` row. Three rows are this repo's: the owner
+label, the open ticket past `Backlog` with no recorded score, and the parent.
 
 Things the checks account for, the first three learned the hard way in the
 source:
@@ -318,7 +353,12 @@ source:
 - **The label, Priority and approval rows read open tickets only.** The
   *invariants* are about open work. A closed
   ticket legitimately sits in `Done` with whatever labels it had, and a check
-  that did not gate on open would report every one of them.
+  that did not gate on open would report every one of them. `AGENTS.md` says
+  every ticket has a Priority, and that is true of a closed one as well, so the
+  audit **reports, as a count on a line of its own, how many tickets closed in
+  the period audited have no Priority.** It names them and scores none of them
+  (the rule after this list). A zero on the open rows is not a claim about the
+  closed ones.
 - **`stateHistory` shows that a ticket passed through `Todo`, not who moved it
   there** (`/board-ops`, Known limitations). The approval row finds a ticket
   that skipped the approval state; it cannot find one approved by the wrong
@@ -337,7 +377,18 @@ enforced.
   exists in this repo, so completeness and scope are checked by the agent
   following the recipe.
 - **Nothing in the tracker marks a ticket's repository.** The scope test is a
-  reading of the ticket, and a ticket that does not name this repository is
-  left out of both the sweep and the audit.
+  reading of the ticket. A ticket that does not name this repository is
+  left untouched by both the sweep and the audit, and is named and counted in
+  the run's report, so "every untriaged ticket" means every one whose scope
+  could be read.
 - **Who set a Priority, and who approved, cannot be read here.** Every write
   through the connector acts as one account (`/board-ops`, Known limitations).
+- **A ticket without the process label is reported, never labelled or scored.**
+  The source labels an issue when it sweeps it in, and also says its process
+  label is never backfilled. Here the rule wins: pass 1 and the audit report the
+  ticket, leave it wholly untouched, and the owner rules. Until then it is
+  reported on every run.
+- **Closed tickets without a Priority are counted, not corrected.** `AGENTS.md`
+  says every ticket has one; the audit reports the count and changes nothing,
+  because scoring settled tickets in bulk is the backfilling this skill
+  refuses. Closing that gap is the owner's call.

@@ -12,11 +12,11 @@
     "expect": "issue-triage"
   },
   {
-    "prompt": "How do I find the tickets in Backlog that nobody has triaged yet?",
+    "prompt": "How do I triage a ticket that is already In Progress but was never scored?",
     "expect": "issue-triage"
   },
   {
-    "prompt": "After scoring a ticket against the rubric, what do I do with the score?",
+    "prompt": "Score NOR-405 against the priority rubric and record the result.",
     "expect": "issue-triage"
   },
   {
