@@ -32,9 +32,13 @@
 //   3. `readLockAdvisories` reads each query to its last page through the
 //      shared list reader (`lib/gh.mjs`), which throws on a failed call, on an
 //      answer that is not a list of pages and on no pages at all.
-//   4. `checkAnswer` checks every entry of every answer. A failed check
-//      THROWS; none skips an entry. Empty, non-JSON or misshapen output is an
-//      error here, never "nothing found".
+//   4. `checkAnswer` checks every entry of every answer, and every
+//      vulnerability of every entry. A failed check THROWS; none skips an
+//      entry. Empty, non-JSON or misshapen output is an error here, never
+//      "nothing found". An advisory that two answers hold is read as two
+//      independent copies: what they say of the advisory as a whole must
+//      agree, and what each lists is united, so neither is taken for having
+//      arrived first.
 //   5. `controlStates` looks for the control advisories in each answer (see
 //      `CONTROLS`). This is what tells an empty answer from "no advisories":
 //      a name that does not exist is answered with one empty page and exit 0,
@@ -143,12 +147,6 @@ const VERSION_MAX = 256;
 
 /** A GitHub advisory id, as it goes into a marker and a link. */
 const GHSA_RE = /^GHSA(?:-[0-9a-z]{4}){3}$/;
-
-/** A CVE id, as it goes into an issue's table. */
-const CVE_RE = /^CVE-\d{4}-\d{4,}$/;
-
-/** The severities the endpoint documents; the sweep ranks no others. */
-const SEVERITIES = ["unknown", "low", "medium", "high", "critical"];
 
 /** Is this value a plain object: an entry of a listing, or a map? */
 function isRecord(value) {
@@ -322,17 +320,28 @@ function rangeAndPatch(id, vulnerability) {
  *     the answer (measured), and an entry that leaves the field out cannot be
  *     told from one that was never withdrawn;
  *   - `severity` and `summary` as strings and `cve_id` as a string or `null`.
- *     None of the three decides anything; each is text in an issue;
- *   - `vulnerabilities`, a non-empty list of objects. Each states its
- *     `package` as an object or `null`, and a package states its `ecosystem`
- *     as a string and its `name` as a string or `null` (the endpoint's schema
- *     allows both nulls).
+ *     None of the three decides anything, so none is held to a form: each is
+ *     text in an issue, and a word or an id this file has not seen must not
+ *     turn a good read into a failed one (the review model's cases 4 and 5);
+ *   - `vulnerabilities`, a non-empty list of objects, EVERY one of which
+ *     states its `package` as an object with a string `ecosystem` and a
+ *     string `name`, its `vulnerable_version_range` as a string, and its
+ *     `first_patched_version`, present, as a string or `null`. That holds for
+ *     a vulnerability of another ecosystem or another package too: one that
+ *     does not say what it is about cannot be shown to be about something
+ *     else, and is not skipped (the review model's case 3). The endpoint's
+ *     schema allows a null package, name and range; measured 2026-11-22 over
+ *     all 8,184 reviewed npm advisories and their 11,750 vulnerabilities,
+ *     none had one.
  *
  * A vulnerability counts as ASKED ABOUT when it is `npm` and names a package
- * of this query. Each of those must state its range as a string `semver`
- * reads, and its `first_patched_version`, present, as a semver version or
- * `null`: the alert path's check, for its reason (`semver` answers "does not
- * satisfy" for a range it cannot read, which would read as "not exposed").
+ * of this query. Each of those must also state a range `semver` reads and a
+ * patched version that is a semver version or `null`: the alert path's
+ * check, for its reason (`semver` answers "does not satisfy" for a range it
+ * cannot read, which would read as "not exposed"). Measured the same day: 16
+ * of the database's 11,237 npm ranges and 21 of its patched versions are not
+ * ones `semver` reads (a calendar version such as `2026.05.0`), so an
+ * advisory like that on a locked package stops the run, by name.
  *
  * And the answer must be an answer to THIS query. Every advisory in it must
  * hold at least one vulnerability that was asked about; and one that is not
@@ -373,12 +382,9 @@ export function checkAnswer(list, asked) {
       fail(`${id} without a withdrawn_at that is a date or null`);
     }
     if (
-      !SEVERITIES.includes(entry.severity) ||
+      typeof entry.severity !== "string" ||
       typeof entry.summary !== "string" ||
-      !(
-        entry.cve_id === null ||
-        (typeof entry.cve_id === "string" && CVE_RE.test(entry.cve_id))
-      )
+      !(entry.cve_id === null || typeof entry.cve_id === "string")
     ) {
       fail(`${id} without its severity, summary or CVE id in a usable form`);
     }
@@ -396,13 +402,17 @@ export function checkAnswer(list, asked) {
         fail(`${id} with a vulnerability that is not an object`);
       }
       const pkg = vulnerability.package;
-      if (pkg === null) continue;
+      const patch = vulnerability.first_patched_version;
       if (
         !isRecord(pkg) ||
         typeof pkg.ecosystem !== "string" ||
-        !(pkg.name === null || typeof pkg.name === "string")
+        typeof pkg.name !== "string" ||
+        typeof vulnerability.vulnerable_version_range !== "string" ||
+        !(patch === null || typeof patch === "string")
       ) {
-        fail(`${id} with a vulnerability that does not state its package`);
+        fail(
+          `${id} with a vulnerability that does not state its package, its vulnerable range and its patched version`,
+        );
       }
       if (pkg.ecosystem !== ECOSYSTEM || !askedVersions.has(pkg.name)) {
         continue;
@@ -470,7 +480,8 @@ export function controlStates(answer) {
  * checked id; the scope says it was not determined, because whether a locked
  * package serves the running server or only the tooling is not computed.
  *
- * The same (advisory, package, range) twice is a contradiction in the answer
+ * The same (advisory, package, range) twice with the same patched version is
+ * taken once. With two patched versions it is a contradiction in the answers
  * and throws, as the same alert listed twice does in the sweep.
  *
  * @param {Iterable<object>} advisories checked entries, each id once
@@ -479,7 +490,7 @@ export function controlStates(answer) {
  */
 export function lockRecords(advisories, versionsOf) {
   const records = [];
-  const seen = new Set();
+  const seen = new Map();
   for (const advisory of advisories) {
     if (advisory.withdrawn_at !== null) continue;
     for (const vulnerability of advisory.vulnerabilities) {
@@ -502,11 +513,15 @@ export function lockRecords(advisories, versionsOf) {
         vulnerability.vulnerable_version_range,
       ]);
       if (seen.has(identity)) {
+        // The same entry again is expected: an advisory two answers held
+        // brings each of its vulnerabilities twice (`readLockAdvisories`).
+        // The same range with ANOTHER patched version is a contradiction.
+        if (seen.get(identity) === patched) continue;
         throw new Error(
-          `the advisory listing held ${advisory.ghsa_id} with the same range for ${pkg.name} twice`,
+          `the advisory listing held ${advisory.ghsa_id} with the same range for ${pkg.name} twice, with two patched versions`,
         );
       }
-      seen.add(identity);
+      seen.set(identity, patched);
       records.push({
         state: "open",
         html_url: `https://github.com/advisories/${advisory.ghsa_id}`,
@@ -593,9 +608,30 @@ export function readLockAdvisories(spawn, entries) {
     }
     for (const s of staleHere) stale.add(name(s));
     for (const advisory of answer) {
-      if (!advisories.has(advisory.ghsa_id)) {
-        advisories.set(advisory.ghsa_id, advisory);
+      const held = advisories.get(advisory.ghsa_id);
+      if (held === undefined) {
+        advisories.set(advisory.ghsa_id, {
+          ...advisory,
+          vulnerabilities: [...advisory.vulnerabilities],
+        });
+        continue;
       }
+      // The same advisory in a second answer. The endpoint returns the whole
+      // advisory each time, so the two copies should be one advisory; they
+      // are still two independent reads, and neither is taken on the
+      // strength of having arrived first (the review model's cases 1 and
+      // 2). What says whether the advisory applies at all must agree, or
+      // the run stops. What each copy lists is united, so a package only
+      // the later copy names is not lost; `lockRecords` takes an entry both
+      // copies hold once, and stops on one range with two patched versions.
+      for (const field of ["withdrawn_at", "severity", "summary", "cve_id"]) {
+        if (held[field] !== advisory[field]) {
+          throw new Error(
+            `${which}: ${advisory.ghsa_id} does not agree with the copy an earlier answer held (its ${field})`,
+          );
+        }
+      }
+      held.vulnerabilities.push(...advisory.vulnerabilities);
     }
   });
   return {

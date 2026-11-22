@@ -316,21 +316,30 @@ test("checkAnswer takes an empty answer: whether that means 'nothing found' is t
   assert.deepEqual(checkAnswer([], ASKED), []);
 });
 
-test("checkAnswer reads past a vulnerability that is not asked about, whatever it holds", () => {
+test("checkAnswer does not hold a vulnerability it was not asked about to semver, only to its shape", () => {
   const list = [
     advisory({
       ghsa: A,
       vulnerabilities: [
         vuln("fast-uri", "< 3.1.6", "3.1.6"),
-        // The endpoint's schema allows a null package and a null name.
-        { package: null, vulnerable_version_range: null },
-        { package: { ecosystem: "npm", name: null } },
-        // Another ecosystem's ranges are not semver, and are not read.
+        // Another ecosystem's ranges are not semver, and are not read as it.
         vuln("fast-uri", "[1.0,2.0)", "2.0", "maven"),
         // Another package's, which this query did not ask about.
         vuln("something-else", "not a range", "nor a version"),
+        vuln("something-else", "< 1.0.0", null),
       ],
     }),
+  ];
+  assert.equal(checkAnswer(list, ASKED), list);
+});
+
+test("checkAnswer takes a severity or a CVE id it has not seen as text, not as a failed read", () => {
+  // The review model's cases 4 and 5: neither field decides anything, and
+  // the sweep's own alert listing says "moderate" where this one says
+  // "medium".
+  const list = [
+    advisory({ ghsa: A, severity: "moderate", cve: "CVE-2026-1" }),
+    advisory({ ghsa: B, severity: "a word nobody has used yet", cve: "x" }),
   ];
   assert.equal(checkAnswer(list, ASKED), list);
 });
@@ -387,8 +396,13 @@ const REFUSED = [
     /without a withdrawn_at/,
   ],
   [
-    "a severity the endpoint does not document",
-    [advisory({ ghsa: A, severity: "high | injected | cell" })],
+    "a severity that is not text",
+    [advisory({ ghsa: A, severity: 3 })],
+    /severity, summary or CVE id/,
+  ],
+  [
+    "an entry with no severity",
+    [{ ...advisory({ ghsa: A }), severity: undefined }],
     /severity, summary or CVE id/,
   ],
   [
@@ -397,8 +411,13 @@ const REFUSED = [
     /severity, summary or CVE id/,
   ],
   [
-    "a CVE id of another form",
-    [advisory({ ghsa: A, cve: "CVE-2026-1 | x" })],
+    "a CVE id that is neither text nor null",
+    [advisory({ ghsa: A, cve: 20261 })],
+    /severity, summary or CVE id/,
+  ],
+  [
+    "an entry that leaves out its CVE id",
+    [{ ...advisory({ ghsa: A }), cve_id: undefined }],
     /severity, summary or CVE id/,
   ],
   [
@@ -461,7 +480,7 @@ const REFUSED = [
   [
     "a range that is not text",
     [advisory({ ghsa: A, range: null })],
-    /not semver/,
+    /does not state its package, its vulnerable range and its patched version/,
   ],
   [
     "a vulnerability that leaves out first_patched_version",
@@ -476,7 +495,62 @@ const REFUSED = [
         ],
       }),
     ],
-    /not semver/,
+    /does not state its package, its vulnerable range and its patched version/,
+  ],
+  [
+    "a vulnerability with a null package, beside one that was asked about",
+    [
+      advisory({
+        ghsa: A,
+        vulnerabilities: [
+          vuln("fast-uri", "< 3.1.6", "3.1.6"),
+          { package: null, vulnerable_version_range: null },
+        ],
+      }),
+    ],
+    /does not state its package, its vulnerable range and its patched version/,
+  ],
+  [
+    "a package with a null name, beside one that was asked about",
+    [
+      advisory({
+        ghsa: A,
+        vulnerabilities: [
+          vuln("fast-uri", "< 3.1.6", "3.1.6"),
+          vuln(null, "< 1.0.0", "1.0.0"),
+        ],
+      }),
+    ],
+    /does not state its package, its vulnerable range and its patched version/,
+  ],
+  [
+    "another package's vulnerability with no range",
+    [
+      advisory({
+        ghsa: A,
+        vulnerabilities: [
+          vuln("fast-uri", "< 3.1.6", "3.1.6"),
+          vuln("something-else", null, "1.0.0"),
+        ],
+      }),
+    ],
+    /does not state its package, its vulnerable range and its patched version/,
+  ],
+  [
+    "another ecosystem's vulnerability that leaves out first_patched_version",
+    [
+      advisory({
+        ghsa: A,
+        vulnerabilities: [
+          vuln("fast-uri", "< 3.1.6", "3.1.6"),
+          {
+            package: { ecosystem: "maven", name: "fast-uri" },
+            vulnerable_version_range: "[1.0,2.0)",
+          },
+        ],
+      }),
+    ],
+    /does not state its package, its vulnerable range and its patched version/,
   ],
   [
     "a patched version that is not a version",
@@ -486,7 +560,7 @@ const REFUSED = [
   [
     "a patched version in the alert listing's shape, not this one's",
     [advisory({ ghsa: A, fixed: { identifier: "3.1.6" } })],
-    /not semver/,
+    /does not state its package, its vulnerable range and its patched version/,
   ],
   [
     "an advisory that names no package this query asked about",
@@ -699,7 +773,24 @@ test("lockRecords keeps an advisory with no patched version, as null", () => {
   assert.equal(record.security_vulnerability.first_patched_version, null);
 });
 
-test("lockRecords stops on the same advisory, package and range twice", () => {
+test("lockRecords takes the same entry twice once", () => {
+  // What two copies of one advisory, from two answers, add up to.
+  const records = lockRecords(
+    [
+      advisory({
+        ghsa: A,
+        vulnerabilities: [
+          vuln("fast-uri", "< 3.1.6", "3.1.6"),
+          vuln("fast-uri", "< 3.1.6", "3.1.6"),
+        ],
+      }),
+    ],
+    lockedVersions([FAST_URI]),
+  );
+  assert.equal(records.length, 1);
+});
+
+test("lockRecords stops on one advisory, package and range with two patched versions", () => {
   assert.throws(
     () =>
       lockRecords(
