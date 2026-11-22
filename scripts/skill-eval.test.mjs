@@ -2,7 +2,8 @@
 // commit d330df96, scripts/skill-eval.test.mjs, with one edit: the placeholder
 // home directory in the `agentEnv` case is `/home/dev` (the source's is a
 // macOS one; the value is arbitrary). Its `#N` references, and "this repo",
-// mean the source repo. Record: PROVENANCE.md.
+// mean the source repo. Added here (NOR-614): the `settingSourcesArgs` case.
+// Record: PROVENANCE.md.
 //
 // Tests for the pure halves of the skill trigger eval (#2163).
 //
@@ -32,6 +33,7 @@ import {
   collectSkillInvocations,
   collectCopilotSkillInvocations,
   agentArgs,
+  settingSourcesArgs,
   parseCopilotVersion,
   killTree,
   stopLiveCopilotRuns,
@@ -847,6 +849,38 @@ test("a Copilot run bounds availability, not just approval", () => {
   // Copilot has no turn flag at all — the budget is enforced by `runPrompt`.
   assert.ok(!args.includes("--max-turns"));
   assert.throws(() => agentArgs("cursor", 1), /unknown agent `cursor`/);
+});
+
+test("setting sources are opt-in and only narrow which settings load (NOR-614)", () => {
+  // Unset or empty: the Claude run is the Inspector's, unchanged.
+  const base = agentArgs("claude", 1, null, undefined);
+  assert.ok(!base.includes("--setting-sources"));
+  assert.deepEqual(agentArgs("claude", 1, null, ""), base);
+  // Set: the flag follows the read-only policy; nothing before it moves.
+  const narrowed = agentArgs("claude", 1, null, " project , local ");
+  assert.deepEqual(narrowed.slice(0, base.length), base);
+  assert.deepEqual(narrowed.slice(base.length), [
+    "--setting-sources",
+    "project,local",
+  ]);
+  // Anything else never reaches the CLI.
+  assert.throws(
+    () => settingSourcesArgs("project,--bare"),
+    /only user, project or local/,
+  );
+  assert.throws(
+    () => settingSourcesArgs("project,"),
+    /only user, project or local/,
+  );
+  // Without `project` the skills under test never load, so every positive
+  // case would read as a miss.
+  for (const v of ["user", "local", "user,local"]) {
+    assert.throws(() => settingSourcesArgs(v), /must include project/);
+  }
+  // Copilot has no such flag; the value is ignored there.
+  assert.ok(
+    !agentArgs("copilot", 1, null, "project").includes("--setting-sources"),
+  );
 });
 
 /** A fake child that emits the given chunks, recording whether it was killed. */
