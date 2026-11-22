@@ -45,7 +45,7 @@ A change to **what an existing tool does** is usually row 1 and row 3. A change 
 | `scripts/lib/` | Helpers the guards share (the skill manifest, npm-script parsing, the Claude CLI runner, main-module detection, Windows shell arguments, the workflow scan, the `bun.lock` reader, the tracked-TypeScript inventory), each with its test |
 | `docs/` | Guides (`skill-authoring.md`, `quality-gate.md`) and the design note for the gate guards |
 | `.claude/skills/` | The procedures (the index is in `AGENTS.md`) |
-| `.github/workflows/` | `main.yml` (the gate in CI) and `dco.yml` (sign-off on a pull request's commits) |
+| `.github/workflows/` | `main.yml` (the gate in CI), `dco.yml` (sign-off on a pull request's commits) and `codeql.yml` (CodeQL code scanning, on pushes to `main`, pull requests into it and a weekly schedule) |
 | `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | The public issue forms and the PR template |
 | `AGENTS.md`, `CLAUDE.md` | The rules, and the one-line pointer that loads them |
 | `PROVENANCE.md` | Where each adopted file and rule came from, and what was edited |

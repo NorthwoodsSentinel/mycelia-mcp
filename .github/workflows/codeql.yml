@@ -1,0 +1,94 @@
+# CodeQL code scanning, as an advanced-setup workflow.
+#
+# In this repo: copied from modelcontextprotocol/inspector at commit
+# 7df76f6eea9ea425891289333837878ebb31ae6a, .github/workflows/codeql.yml, by
+# copy then edit (the unchanged file is this file's first commit here). The
+# "#NNNN" numbers below are the source repository's issues. Edits, four: the
+# branch list is `main` only, on `push` and on `pull_request`; this header;
+# the note on the timeout; the comment on the cron line (the source calls the
+# slot "default setup's old slot", which is its own history: default setup
+# never ran here). Nothing else: the languages, the query suite, the
+# permissions, the concurrency group, the cron expression and the pins are
+# the source's. Record: PROVENANCE.md, "Sweeps". Design:
+# docs/DESIGN-nor-673-sweeps.md.
+#
+# The source adopted this file to replace CodeQL DEFAULT setup, which analyzes
+# only the default branch and pull requests into it, because it develops on a
+# second branch that default setup never scanned (#2545, #2540). This
+# repository has one long-lived branch, `main`, so that reason does not apply
+# here. The file is adopted as the source has it all the same: the triggers,
+# the languages, the pins and the permissions are then in the repository and
+# change only through a reviewed diff, where default setup is a setting.
+#
+# Same languages (`actions`, `javascript-typescript`) and the same default
+# query suite as default setup has; what this file states is which refs run.
+#
+#   - `push` to `main` — the baseline the branch's alerts are tracked against.
+#   - `pull_request` into `main` — a finding is reported on the pull request
+#     that introduced it. Runs from the pull request's own ref, so this file is
+#     live from the pull request that adds it, as `dco.yml` is.
+#   - the weekly `schedule`, which GitHub runs from the DEFAULT branch only.
+#
+# ⚠️ Default setup must be OFF (a repository setting, and so the owner's:
+# Advanced Security → CodeQL analysis — not a file). GitHub refuses an
+# advanced-setup upload while it is on, and with both on the two would
+# double-report.
+#
+# `security-events: write` is the scope that uploads results — and therefore
+# the scope that could suppress them — so `verify:action-pins` counts this job
+# as credentialed (#2484). In this repository every action in every job is
+# SHA-pinned in any case (AGENTS.md, the pin rule). Each SHA and its exact
+# release came from one tag lookup, 2026-11-21.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 16 * * 6" # 16:23 UTC Saturday, the source's slot
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    # A newer push to the same PR or branch supersedes the analysis.
+    concurrency:
+      group: codeql-${{ github.ref }}-${{ matrix.language }}
+      cancel-in-progress: true
+    # PROVISIONAL: 10 minutes is the source's value, sized from its own runs
+    # (its note: over 30 runs, 2026-09-02 – 2026-10-17, `actions` ~40s and
+    # `javascript-typescript` 1.5–4.7 min; twice the slowest, rounded up to the
+    # next five minutes, #2333). No run of this workflow in this repository had
+    # been observed when this was written. Re-size it from this repository's
+    # runs, with the range, as AGENTS.md requires (Test-gate timeouts).
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          # Neither language needs a build; this is what default setup used.
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: "/language:${{ matrix.language }}"
