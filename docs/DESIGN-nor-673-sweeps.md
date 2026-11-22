@@ -1,6 +1,6 @@
 # DESIGN: NOR-673: the Inspector's three scheduled sweeps
 
-Status: design, reviewed by the review model in two rounds before any code was written (section 9). Built so far: the CodeQL workflow, which arrives with the pull request that brings this note to `main`. Not built yet: the monthly and the daily sweep, and every script this note names.
+Status: design, reviewed by the review model in two rounds before any code was written (section 9). Built so far: the CodeQL workflow, which arrives with the pull request that brings this note to `main`, and the monthly dependency refresh, in the pull request after it (what was built, and where it goes beyond this note, is section 10). Not built yet: the daily sweep and its script.
 Source: `modelcontextprotocol/inspector`, branch `v2/main`, commit `7df76f6eea9ea425891289333837878ebb31ae6a`. Read in full for this design: `scripts/dependabot-alerts.mjs` (1,478 lines), `scripts/dependency-refresh.mjs` (713), `.github/workflows/dependency-refresh.yml`, `dependabot-alerts.yml` and `codeql.yml`, `scripts/lib/markdown-cell.mjs`, `scripts/lib/gh.mjs`. Read in part: see "Not read" in section 5.
 Target: a branch cut at `007915d`, this repository's `main` when this was written.
 
@@ -181,3 +181,15 @@ Two rounds by the review model, before any code. Both returned a review; both ve
 - **Round d2 (`273ced2`): fail, 2 findings.**
   1. MEDIUM, the note said pacing of issue writes had no requirement behind it, while `AGENTS.md` requires one second between bulk GitHub writes: **fixed**: addition A3, and the sentence is corrected (section 8).
   2. MEDIUM, the timeouts are not sized from observed runs: **answered** (section 3, "Timeouts"). No run of a workflow can be observed before the workflow exists. The first values are provisional: the source's own 10 minutes for CodeQL, 5 for the two sweeps, which the source leaves unbounded. Each is re-sized from the first scheduled runs by the rule's formula; that is a stated limitation with a follow-up ticket.
+
+## 10. As built: the monthly dependency refresh (PR B)
+
+Built as section 2 lists it, with these points decided or found while building. Each is also in the header of the file it concerns, and in `PROVENANCE.md`, "Sweeps".
+
+- **The author check asks for two labels, `chore` and `dependabot`.** The issue is filed with three (`factory` as well, as E4 says). The source's own check for its upstream watch leaves its process label out in the same way.
+- **The author check reads the REST shape and requires `user.type` to be `Bot`.** The source's helper tolerates a missing bot flag, for `gh` versions that leave it out; the REST listing always states the type.
+- **Addition A3 is `scripts/lib/paced-writes.mjs`.** A run of the monthly sweep makes one issue write, so its pause does not fire; the writer is on the write path so that a second write cannot be added without it.
+- **Found while building, and fixed: a failed `npm outdated` can exit 1.** Section 3's "On failure" row quotes the source: every lookup failure throws. Measured with npm 11.20.0 on 2026-11-21, with the registry made unreachable: exit **1**, the status that also means "something is outdated", and an `error` object on standard output, which the source's parse reads as one outdated package. The script here throws on that report, on JSON that is not an object of package objects, and when npm printed nothing at all: a clean `npm outdated` prints `{}` (measured with npm 11.20.0 and with npm 10.9.11, the line Node 22 bundles), so an empty answer is a short read. A release list that printed nothing throws for the same reason: a repository with no release still prints a line break (measured). The error report was measured with npm 11.20.0 only.
+- **Found by the review model's test cases, and fixed:** a listing answered with no pages at all was read as "no issue exists" (`ghPaginatedList` now throws on it; an empty listing is one empty page, measured).
+- **E7 as built:** the marker under "Dependency updates are issue-driven" is replaced by a note that the monthly sweep is here and the daily one is not, since that paragraph speaks of both halves. PR C makes it plain.
+- **Not built, and still needed before a run can file:** the labels `chore` and `dependabot` (section 6).

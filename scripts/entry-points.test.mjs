@@ -25,7 +25,9 @@
 // `claude` alone on PATH (below), so it takes its local-CLI branch and never
 // reaches the network. The three pr-flow helpers (`gate-run`, `handoff-check`,
 // `audit-verdict`) are each run into their own refusal of a bad argument, which
-// starts no other program. Run via `npm run test:scripts`.
+// starts no other program. The monthly dependency sweep
+// (`dependency-refresh`) is run with `GITHUB_REPOSITORY` empty, which it
+// refuses before it starts `npm` or `gh`. Run via `npm run test:scripts`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -172,6 +174,21 @@ const GUARDS = [
     script: "audit-verdict.mjs",
     args: [],
     terminal: [{ status: 2, line: /^audit verdict: no verdict$/m }],
+  },
+  // The monthly sweep is not a gate stage either. It runs in a workflow, and
+  // one that is never "main" would exit 0 there having read and filed
+  // nothing: a green run of a sweep that did not sweep. With no repository
+  // named it throws on its first line, before any `npm` or `gh` is started.
+  {
+    script: "dependency-refresh.mjs",
+    args: [],
+    env: { GITHUB_REPOSITORY: "" },
+    terminal: [
+      {
+        status: 1,
+        line: /^Error: repo not specified \(GITHUB_REPOSITORY unset\)$/m,
+      },
+    ],
   },
 ];
 
