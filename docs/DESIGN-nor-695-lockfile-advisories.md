@@ -1,6 +1,6 @@
 # DESIGN: NOR-695: the daily sweep also checks the lock file
 
-Status: design, reviewed by the review model in two rounds before any code was written (section 10), then corrected in two places before the build (section 11). Where section 11 differs from a sentence above it, section 11 is the design.
+Status: built. The design was reviewed by the review model in two rounds before any code was written (section 10), then corrected in two places before the build (section 11); what was built, and where it goes beyond or departs from this note, is section 12. Where a later section differs from a sentence above it, the later section stands.
 Parent: NOR-673, whose design note (`docs/DESIGN-nor-673-sweeps.md`) recorded what this closes as its first accepted limitation and referred it to the owner. The owner was asked "Should the daily sweep also read mycelia-mcp's lock file?" and answered yes on 2026-11-22.
 Target: a branch cut at `3eda5c9`, this repository's `main` when this was written.
 
@@ -277,3 +277,35 @@ Why absent is a failed read even when the other control is good: a withdrawn adv
 A control is an ordinary pair to the rest of the run. Its advisory becomes a record only if the lock file itself holds that package at a version in range, like any other advisory; nothing is dropped by name.
 
 Each query is at most 100 pairs from the lock file plus the two controls, and its whole `affects` value stays under the 4,000-character budget of section 4.
+
+## 12. As built
+
+Built as sections 2, 4 and 11 say: `scripts/lib/lock-advisories.mjs` with its test, one numbered edit to `scripts/dependabot-alerts.mjs` (its header's edit 15), and the records. No line of the workflow that runs is changed, and no permission, secret, action or step is added. Each point below is also in the header of the file it concerns, and in `PROVENANCE.md`, "Sweeps".
+
+**Found while building, each by running the reader against the real endpoint.**
+
+- **The query says `type=reviewed` in so many words.** GitHub's page gives that as the default (section 3, Reported). Measured on 2026-11-22: a query for the two control pairs with no `type` returned 8 advisories, one of them of type `unreviewed` (and withdrawn); with `type=reviewed` it returned the other 7. Section 4's check that every entry's type is `reviewed` would otherwise have stopped every run.
+- **How often the database holds something the checks refuse.** Measured the same day over every reviewed npm advisory, 8,184 of them with 11,750 vulnerabilities: none has a null or missing package, name, range or patched-version field, an empty list of vulnerabilities, or a type other than `reviewed`; 416 are withdrawn. Of the 11,237 npm vulnerabilities, 16 have a range and 21 a patched version that `semver` does not read (a calendar version such as `2026.05.0`). So an advisory like that on a package this repository locks stops the run, naming the advisory and the package: the alert path's rule for an npm alert, and for its reason.
+
+**Added past section 4, and why.**
+
+- **An answer must be an answer to its own query.** Every advisory in an answer must name a package that query asked about, and one that is not withdrawn must hold a range that an asked version satisfies as `semver` reads it. The first catches an answer to some other question. The second catches the listing and `semver` disagreeing about a version: the listing counts a prerelease such as `3.1.6-beta.1` as below `3.1.6`, `semver` does not match it against a range that names no prerelease, and without this check the advisory would be dropped in silence as "not in range". With it the run stops and names the advisory.
+- **An advisory that two answers hold is two reads, not one.** Section 4 says such an advisory "is taken once". As built, what the two copies say of the advisory as a whole (`withdrawn_at`, severity, summary, CVE id) must agree, or the run stops; what each lists is united, an entry both hold is taken once, and one package and range with two patched versions stops the run. This came from the review model's cases 1 and 2.
+- **A record with no patched version stays in the feed.** It is logged by name and the grouping files nothing for it, as section 4 says. It is kept, and not dropped, so that an open issue whose advisory has lost its patched version is left alone and not cleared: the alert path's behaviour.
+- **`main` takes the check as a fifth parameter**, as it takes its spawn function and its writer. The cases that were there before this change, and the earlier round's eight attack cases, run with a check that found nothing, so each keeps its meaning; the new cases run the default, as a run does.
+
+**Where the build first departed from section 4, and was brought back by the review model's cases.**
+
+- It read past a vulnerability whose package was null, because the endpoint's schema allows one. Section 4 says every vulnerability states its package, range and patched version; the measurement above found none that does not; the check now holds every one to it (case 3).
+- It held the severity to the endpoint's five documented words and the CVE id to a form. Section 4 says they are strings, and section 6 that fields which decide nothing are data; both checks are back to that (cases 4 and 5).
+
+**The rule "the alert path wins" is per advisory, and what follows from it.** A record is dropped when an alert names the same package **and** the same advisory. So two different advisories on one package, one that Dependabot alerted on and one it did not, are two issues, one under `package.json` and one under `bun.lock`, even when both name the same patched version. Dropping every lock-file record for a package that has any alert would hide the nested copy an alert cannot see, which is what this addition is for. This is an accepted limitation beside those of section 7.
+
+**The review model's test cases.** A tests round on `1cd003e` returned five. All five failed on that commit. Four are met by fixes, and the fifth in its first variant; its second variant, which calls two packages of one advisory with two patched versions a contradiction, is not met and is kept in the suite as written, marked as an open item, with a proposed amendment beside it and two tests for the amended verdict. Two links in the round's text pointed into the directory it read on the author's machine and are written as `<checkout>` in the suite; nothing else in any case's text is changed.
+
+**The evidence of section 1, as it stands at the build's head.**
+
+- E1, E3, E4, E5, E6 and E8 are in the tree: 112 cases for the helper, 42 for the sweep with the check in it, and the review model's five. In a scratch copy, each of 48 one-line changes to the new code turned at least one of those tests red.
+- E2 and E7 are in the pull request: the gate's result for its head, and the reader run by hand against the real endpoint beside `bun audit`.
+- Measured with the reader on 2026-11-22, on `main`'s lock file as pull request 22 left it: 283 entries, three queries, both controls good in each, and no advisory in range. Handed the three versions that were locked on the design day, the same reader returned the 8 advisories and 3 bumps of section 1.
+- What only the first scheduled runs can show is unchanged from section 1.
