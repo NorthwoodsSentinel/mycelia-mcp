@@ -2,7 +2,8 @@
 // scripts/lib/gh.test.mjs, by copy then edit. Edits: the tests of the two
 // exports removed from the library are removed with them, and the tests of
 // `ghPaginatedObject` are added (NOR-610). The two tests of `ghPaginatedList`
-// are the source's, back with the function (NOR-684). Record: PROVENANCE.md.
+// are the source's, back with the function, and a third is written here for
+// its one edit (NOR-684). Record: PROVENANCE.md.
 //
 // Tests for scripts/lib/gh.mjs (#2558) — the shared `gh` invocation helpers
 // under the maintainer-workflow scripts. Run via `npm run test:scripts`.
@@ -82,6 +83,15 @@ test("ghPaginatedList rejects a non-list response", () => {
     stderr: "",
   });
   assert.throws(() => ghPaginatedList(mixedPages, "p"), /non-list/);
+});
+
+test("ghPaginatedList rejects an answer of no pages, and accepts one empty page", () => {
+  // Written here. `[]` is not an empty list: a list endpoint with nothing to
+  // list answers `[[]]`. No pages means nothing was read.
+  const noPages = spawnReturning({ status: 0, stdout: "[]", stderr: "" });
+  assert.throws(() => ghPaginatedList(noPages, "p"), /p: no pages/);
+  const onePage = spawnReturning({ status: 0, stdout: "[[]]", stderr: "" });
+  assert.deepEqual(ghPaginatedList(onePage, "p"), []);
 });
 
 /** A slurped two-page answer of an object-per-page endpoint. */

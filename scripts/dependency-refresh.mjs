@@ -52,10 +52,28 @@
 //      third parameter, so a test can pass one whose pause is a recorder, or
 //      one that records which calls went through it.
 //
-// Unchanged: `npm outdated --json` and its exit-code rule (measured over a
-// tree installed by Bun: docs/DESIGN-nor-673-sweeps.md, section 3), the action
-// half, the marker, the title, and "never closes an issue, never opens a pull
-// request". (Addition A2, a `concurrency` block, is in the workflow file.)
+//   8. A FAILED `npm outdated` is recognised by what it printed, as well as by
+//      its exit status. The source accepts exit 0 and exit 1 and parses
+//      whatever came out, on the understanding that a registry error exits 2.
+//      Measured for this change (npm 11.20.0, 2026-11-21, the registry made
+//      unreachable): exit **1**, the same status as "something is outdated",
+//      with `{"error": {"code": …, "summary": …}}` on standard output. Parsed
+//      the source's way that is one outdated package called `error`, and the
+//      sweep would have replaced a real table with that row. So `parseOutdated`
+//      throws on npm's error report, and on JSON that is not an object of
+//      packages (an array reads as "nothing outdated", a string as a package
+//      called `0`), and `runOutdated` throws on exit 1 with nothing printed
+//      (exit 1 says something is outdated; an empty answer is a short read).
+//      The last three are the review model's attack cases 2, 3 and 4
+//      (`scripts/dependency-refresh-attack.test.mjs`). With nothing outdated
+//      npm prints `{}` and exits 0 (measured the same day), so a clean run is
+//      untouched.
+//
+// Unchanged: that `npm outdated --json` is what is asked (measured over a tree
+// installed by Bun: docs/DESIGN-nor-673-sweeps.md, section 3) and that only
+// exit 0 and exit 1 can be successes, the action half, the marker, the title,
+// and "never closes an issue, never opens a pull request". (Addition A2, a
+// `concurrency` block, is in the workflow file.)
 //
 // What this file can write: one issue's body, or one new issue, in the
 // repository `GITHUB_REPOSITORY` names, with the token `gh` finds in its
@@ -150,13 +168,40 @@ export const PLACEMENT_DOC = `https://github.com/${REPO_SLUG}/blob/main/AGENTS.m
 /**
  * Normalize one install's `npm outdated --json` output.
  *
+ * Throws on an answer that is not a list of packages (edit 8 in the header):
+ * JSON that is not an object, and npm's own error report, which it prints on
+ * standard output with exit status 1 — the status that otherwise means
+ * "something is outdated".
+ *
  * @param {string} json raw stdout from `npm outdated --json` (may be `""` or `"{}"`)
  * @returns {Array<{name: string, current: string, wanted: string, latest: string}>}
+ * @throws on JSON that is not an object of packages, and on npm's error report
  */
 export function parseOutdated(json) {
   const trimmed = json.trim();
   if (trimmed === "") return [];
   const parsed = JSON.parse(trimmed);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "npm outdated printed JSON that is not an object of packages",
+    );
+  }
+  // npm's error report is `{"error": {"code", "summary", "detail"}}`. A real
+  // package named `error` would be an entry like any other, with at least one
+  // of the three version fields, so the two cannot be confused.
+  const failure = parsed.error;
+  if (
+    failure !== null &&
+    typeof failure === "object" &&
+    !Array.isArray(failure) &&
+    !("current" in failure) &&
+    !("wanted" in failure) &&
+    !("latest" in failure)
+  ) {
+    throw new Error(
+      `npm outdated reported an error instead of a list (${String(failure.code ?? "no code")}): ${String(failure.summary ?? "").trim()}`,
+    );
+  }
   return Object.entries(parsed)
     .map(([name, info]) => ({
       name,
@@ -358,7 +403,17 @@ function runOutdated(dir, spawn) {
       `npm outdated failed in ${dir} (exit ${result.status}): ${(result.stderr ?? "").trim()}`,
     );
   }
-  return result.stdout ?? "";
+  const stdout = result.stdout ?? "";
+  // Exit 1 says "something is outdated", so it comes with a list. With
+  // nothing printed it is a short read, and read as a list it would be an
+  // empty one: "nothing is behind", and an open issue's table cleared (edit 8
+  // in the header).
+  if (result.status === 1 && stdout.trim() === "") {
+    throw new Error(
+      `npm outdated in ${dir} exited 1, which says something is outdated, and printed nothing: ${(result.stderr ?? "").trim()}`,
+    );
+  }
+  return stdout;
 }
 
 function collectActionRefs() {

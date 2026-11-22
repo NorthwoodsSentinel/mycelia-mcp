@@ -17,7 +17,8 @@
 //   - below the line "written here": the cases for addition A1 (a marker is
 //     trusted only on what the automation wrote; the labelled listing), for
 //     addition A3 (issue writes go through the paced writer), for a write that
-//     fails, and for the issue text naming nothing of the source's.
+//     fails, for the issue text naming nothing of the source's, and for a
+//     failed `npm outdated` that exits 1 (the script's edit 8).
 //
 // The review model's adversarial cases for this sweep are in
 // `scripts/dependency-refresh-attack.test.mjs`. Record: PROVENANCE.md, "Sweeps".
@@ -79,6 +80,8 @@ function sweepIssue(number, body, overrides = {}) {
  * @param {object} opts
  * @param {Record<string,unknown>} [opts.outdated] parsed `npm outdated` payload, per install dir
  * @param {number} [opts.outdatedStatus] exit status for every `npm outdated`
+ * @param {{status: number, stdout: string, stderr: string}} [opts.outdatedResult]
+ *   the whole result of every `npm outdated`, in place of the two above
  * @param {object[]} [opts.existing] the open `dependabot`-labelled issues, as one page
  * @param {unknown} [opts.listing] the whole slurped listing answer, in place of `[existing]`
  * @param {number} [opts.listingStatus] exit status of the listing call
@@ -92,6 +95,7 @@ function sweepIssue(number, body, overrides = {}) {
 function fakeSpawn({
   outdated = {},
   outdatedStatus,
+  outdatedResult,
   existing = [],
   listing,
   listingStatus,
@@ -106,6 +110,7 @@ function fakeSpawn({
   const fn = (cmd, args, opts) => {
     calls.push({ cmd, args, cwd: opts?.cwd, input: opts?.input });
     if (cmd === "npm") {
+      if (outdatedResult) return outdatedResult;
       const payload = outdated[opts.cwd] ?? {};
       const found = Object.keys(payload).length > 0;
       return {
@@ -894,4 +899,82 @@ test("the cleared body says a SHA pin with a version comment is covered", () => 
   // covered, which here would read as "no action was checked".
   const body = buildClearedBody("2026-11-21");
   assert.match(body, /commit SHA followed by a `# vX\.Y\.Z` comment/);
+});
+
+// The script's edit 8: a failed `npm outdated` is recognised by what it
+// printed. (The exit-1-and-nothing-printed case, and JSON that is not an
+// object, are the review model's cases 2 to 4, in the attack suite.)
+
+/**
+ * What npm 11.20.0 printed on standard output, with exit status 1, when the
+ * registry could not be reached (measured 2026-11-21; the address here is a
+ * placeholder).
+ */
+const NPM_ERROR_REPORT = JSON.stringify(
+  {
+    error: {
+      code: "ECONNREFUSED",
+      summary:
+        "FetchError: request to https://registry.example/ajv failed, reason: connect ECONNREFUSED",
+      detail:
+        "If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'",
+    },
+  },
+  null,
+  2,
+);
+
+test("parseOutdated throws on npm's error report instead of listing a package called error", () => {
+  assert.throws(
+    () => parseOutdated(NPM_ERROR_REPORT),
+    /npm outdated reported an error instead of a list \(ECONNREFUSED\): FetchError: request to/,
+  );
+  // An error report with no code or summary is still not a list.
+  assert.throws(
+    () => parseOutdated('{"error":{}}'),
+    /reported an error instead of a list \(no code\)/,
+  );
+});
+
+test("parseOutdated still lists a real package that is named error", () => {
+  // Such a package exists on the registry. Its entry has version fields,
+  // which npm's error report never has.
+  const json = JSON.stringify({
+    error: { current: "7.0.0", wanted: "7.0.2", latest: "10.4.0" },
+  });
+  assert.deepEqual(parseOutdated(json), [
+    { name: "error", current: "7.0.0", wanted: "7.0.2", latest: "10.4.0" },
+  ]);
+  assert.deepEqual(parseOutdated('{"error":{"latest":"1.0.0"}}'), [
+    { name: "error", current: "(missing)", wanted: "?", latest: "1.0.0" },
+  ]);
+});
+
+test("main fails the sweep when npm outdated exits 1 with its error report, and writes nothing", () => {
+  // Exit 1 is also what "something is outdated" exits with, so the status
+  // alone lets this through. Read the source's way it is one package called
+  // `error`, and the open issue's real table would be replaced by that row.
+  const spawn = fakeSpawn({
+    outdatedResult: {
+      status: 1,
+      stdout: NPM_ERROR_REPORT,
+      stderr: "npm error code ECONNREFUSED",
+    },
+    existing: [sweepIssue(77, `${ISSUE_MARKER}\n| \`zod\` | 3.0.0 |`)],
+  });
+  assert.throws(
+    () => captureLog(() => main("o/r", spawn)),
+    /npm outdated reported an error instead of a list \(ECONNREFUSED\)/,
+  );
+  assert.equal(ghCall(spawn, "create"), undefined);
+  assert.equal(ghCall(spawn, "edit"), undefined);
+});
+
+test("a clean npm outdated, exit 0 and an empty object, is still a clean run", () => {
+  // What npm 11.20.0 prints when nothing is outdated (measured 2026-11-21).
+  const spawn = fakeSpawn({
+    outdatedResult: { status: 0, stdout: "{}\n", stderr: "" },
+  });
+  const log = captureLog(() => main("o/r", spawn));
+  assert.ok(log.some((l) => l.includes("no-op")));
 });

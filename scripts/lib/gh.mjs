@@ -7,8 +7,9 @@
 // are removed, because nothing here uses them; and `ghPaginatedObject` is
 // added, for the endpoints that answer with one object per page and a
 // `total_count`. `ghPaginatedList` was removed with the other two while
-// nothing used it and is back, as the source has it, now that the sweep lists
-// its own open issues through it. Record: PROVENANCE.md.
+// nothing used it and is back now that the sweep lists its own open issues
+// through it: the source's function, with one edit, marked where it is made
+// (an answer of no pages at all throws). Record: PROVENANCE.md.
 //
 // Shared `gh` invocation helpers for the maintainer-workflow scripts (#2558)
 // — the pr:*, board:*, advisory:* and action:* helpers. Those scripts replace
@@ -71,11 +72,21 @@ export function ghJson(spawn, args) {
  * ⚠️ `--slurp` is load-bearing (same note as `dependabot-alerts.mjs`): without
  * it `gh api --paginate` concatenates one JSON array per page into invalid
  * JSON. With it the output is an array of pages, flattened here.
+ *
+ * Edit in this repo (NOR-684, the review model's attack case 5): an answer of
+ * NO pages throws. A list endpoint with nothing to list answers with one
+ * empty page (`[[]]`, measured against this repository's issue listing), so
+ * `[]` is not "an empty list": no page was read at all, and "every one of no
+ * pages is a list" would have passed it. A caller that took that for "no
+ * issue exists" would file a duplicate.
  */
 export function ghPaginatedList(spawn, path) {
   const pages = ghJson(spawn, ["api", "--paginate", "--slurp", path]);
   if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
     throw new Error(`unexpected non-list response from ${path}`);
+  }
+  if (pages.length === 0) {
+    throw new Error(`unexpected response from ${path}: no pages`);
   }
   return pages.flat();
 }
