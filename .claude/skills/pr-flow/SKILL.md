@@ -67,7 +67,7 @@ A sign-off certifies the commit in **your own name**. Never fabricate someone el
 
 ⚠️ **This repository is public, and a commit's author and committer are published with it.** Before the first commit in a worktree, read `git config user.name` and `git config user.email` there and confirm they are the identity this repository's commits carry. A rebase and an amend write the committer from that configuration too, so read `git log -1 --format='%an <%ae> | %cn <%ce>'` after either one, before pushing.
 
-⚠️ `DCO` is not yet a _required_ check in this repo; that is a ruleset, and the owner's setting (`AGENTS.md`). Until it is, a PR showing `DCO` missing or "expected" is an outage, not a pass.
+⚠️ `DCO` and `validate` are _required_ checks on `main` since 2026-11-22, by a ruleset that is the owner's setting (`AGENTS.md`). A PR showing `DCO` missing or "expected" is still an outage, not a pass: GitHub will not merge it, and the cause needs finding.
 
 ## 4. Run the gate
 
