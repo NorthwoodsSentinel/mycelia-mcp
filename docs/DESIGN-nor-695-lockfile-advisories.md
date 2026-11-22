@@ -1,6 +1,6 @@
 # DESIGN: NOR-695: the daily sweep also checks the lock file
 
-Status: design only. No script, test or workflow file is changed by the commits that bring this note. It is reviewed by the review model before any code is written (section 10).
+Status: design, reviewed by the review model in two rounds before any code was written (section 10), then corrected in two places before the build (section 11). Where section 11 differs from a sentence above it, section 11 is the design.
 Parent: NOR-673, whose design note (`docs/DESIGN-nor-673-sweeps.md`) recorded what this closes as its first accepted limitation and referred it to the owner. The owner was asked "Should the daily sweep also read mycelia-mcp's lock file?" and answered yes on 2026-11-22.
 Target: a branch cut at `3eda5c9`, this repository's `main` when this was written.
 
@@ -10,7 +10,7 @@ Words used below. **Measured**: run for this design on 2026-11-22 (UTC), on macO
 
 ## 1. Outcome, and the evidence that shows it is done
 
-**The gap, measured.** `bun.lock` holds 284 entries: 271 package names at 279 distinct name-and-version pairs. `package.json` declares 12 of those names; 259 are not declared. GitHub's dependency graph for this repository holds the declared ones only (`docs/DESIGN-nor-673-sweeps.md`, section 5). On the design day the repository had 0 Dependabot alerts in any state and 0 open issues labelled `dependabot`, and the daily sweep had not yet run. Asked about the same lock file on the same day, two advisory sources each named the same 8 advisories, on 3 packages that `package.json` does not declare: `hono` (5), `@hono/node-server` (2) and `minimatch` (1), seven of moderate severity and one low. So the first accepted limitation is not a hypothetical: today it hides eight known advisories.
+**The gap, measured.** `bun.lock` holds 284 entries: 271 package names at 279 distinct name-and-version pairs. `package.json` declares 12 of those names; 259 are not declared. GitHub's dependency graph for this repository holds the declared ones only (`docs/DESIGN-nor-673-sweeps.md`, section 5). On the design day the repository had 0 Dependabot alerts in any state and 0 open issues labelled `dependabot`, and the daily sweep had not yet run. Asked about the same lock file on the same day, two advisory sources each named the same 8 advisories, on 3 packages that `package.json` does not declare: `hono` (5), `@hono/node-server` (2) and `minimatch` (1), seven of moderate severity and one low. So the first accepted limitation was not a hypothetical: on the design day it hid eight known advisories. **That was true when this was written and is not true now.** Pull request 22, merged on 2026-11-22, moved the three packages out of range. Re-measured on `main` at `0124fd7` the same day: 283 entries, 278 pairs, and no locked version in range of any advisory that has not been withdrawn.
 
 **Outcome.** A package version locked in `bun.lock` that is in range of a GitHub-reviewed advisory that has not been withdrawn and has a patched version gets one GitHub issue from the daily job, whether or not GitHub's dependency graph holds the package. A run that could not read the lock file or the advisory source files nothing, edits nothing, clears nothing and ends red.
 
@@ -34,7 +34,7 @@ Words used below. **Measured**: run for this design on 2026-11-22 (UTC), on macO
 - That the issues are filed by `github-actions[bot]` with the three labels, and that the next run finds them again and files no second one.
 - The run's duration against the job's provisional 5-minute timeout (NOR-686). The three advisory reads took 2.2 seconds together when measured.
 
-If the lock file and the advisories are as they were on the design day, the first run after the merge files three issues, one second apart: `hono` to 4.13.16, `@hono/node-server` to 2.1.6 and `minimatch` to 11.0.1. That is a measurement of one day, not the expected result; the run is judged against the state it read (the rule E4 and E5 of the parent design follow).
+On the design day the first run would have filed three issues: `hono` to 4.13.16, `@hono/node-server` to 2.1.6 and `minimatch` to 11.0.1. With the lock file as it is on `main` since pull request 22, the first run finds nothing in range and files nothing. Either is a measurement of one day, not the expected result; the run is judged against the state it read (the rule E4 and E5 of the parent design follow).
 
 ## 2. What is added, and what it reuses
 
@@ -113,7 +113,7 @@ It runs **inside the existing daily job and inside the existing script**: one jo
 2. The open Dependabot alerts (unchanged).
 3. **New: the dismissed Dependabot alerts** (`repos/<o>/<r>/dependabot/alerts?state=dismissed,auto_dismissed&per_page=100`, every page, through `gh api --paginate --slurp`; measured on this repository: `[[]]`, exit 0). Each entry must be an object in one of those two states that names its package, its ecosystem and its advisory id; anything else throws. Its only use is the rule "the alert path wins" below.
 4. **New: `bun.lock`**, read once through `scripts/lib/bun-lock.mjs`, which throws on a file that is missing, will not parse, is a lock file version it does not know, or holds an entry whose key and name disagree. Then every entry is checked: its name must be an npm package name (lower-case letters, digits, `.`, `_`, `-`, with an optional `@scope/`), and its version must be a `semver` version. **An entry that fails either check stops the run here.** A copy that is not a registry version (a git or file source) cannot be asked about, and a run that skipped it would be green having not checked it. On the design day all 284 entries pass.
-5. **New: the advisory source.** The pairs are sorted and split into queries of at most 100 pairs and at most 4,000 percent-encoded characters of `affects` value: three queries today, of 100, 100 and 79 pairs (measured). Each is `advisories?ecosystem=npm&per_page=100&affects=<value>`, read to the last page through `ghPaginatedList`, which throws on a non-zero exit, on an answer that is not a list of pages, and on no pages at all.
+5. **New: the advisory source.** The pairs are sorted and split into queries of at most 100 pairs and at most 4,000 percent-encoded characters of `affects` value: three queries today, of 100, 100 and 79 pairs (measured). Each is `advisories?ecosystem=npm&per_page=100&affects=<value>`, with **one** `affects` parameter whose value is the pairs joined by commas (section 11 says why it must be one), read to the last page through `ghPaginatedList`, which throws on a non-zero exit, on an answer that is not a list of pages, and on no pages at all.
 6. The open issues labelled `dependabot` (unchanged), and each comment listing just before the one comment it guards (unchanged).
 
 **The checks on each answer of step 5.** Every one throws; none skips an entry.
@@ -121,7 +121,7 @@ It runs **inside the existing daily job and inside the existing script**: one jo
 - Each entry is an object whose `ghsa_id` matches `GHSA-xxxx-xxxx-xxxx` (lower-case letters and digits), whose `type` is `reviewed`, whose `withdrawn_at` is present and is `null` or a string, whose `severity` and `summary` are strings, whose `cve_id` is a string or `null`, and whose `vulnerabilities` is a non-empty list of objects, each stating a `package` with a string `ecosystem` and `name`, a string `vulnerable_version_range`, and a `first_patched_version` that is present and is a string or `null`.
 - No advisory id twice in one query's answer. (The same advisory in two queries' answers is expected, and is taken once.)
 - For a vulnerability whose ecosystem is `npm` and whose package name is in the lock file: the range must be one `semver` reads (after the sweep's existing `toSemverRange`, and not empty), and the patched version must be a `semver` version or `null`. This is the check the alert path makes on an npm alert, for the same reason: `semver` answers "does not satisfy" for a range it cannot read, which would read as "not exposed".
-- **The control pair.** Every query's `affects` value also carries `minimist@0.0.8`, and its answer must hold `GHSA-xvch-5gv4-984h`, not withdrawn, with a `minimist` range that `0.0.8` satisfies. If it does not, the run stops: an answer that leaves out an advisory known to apply cannot be read as "nothing found". This is what tells an empty answer from "no advisories" (measured: a name that does not exist gives `[[]]`, exit 0, and the control advisory is in the answer when the pair is added). The control advisory is then dropped, unless the lock file itself holds `minimist`. If that advisory is ever withdrawn or changed, the run is red until a person replaces the control: that is the safe side.
+- **The control pairs** (two since section 11, which is the rule; this is its reason). Every query's `affects` value also carries pairs that are known to be in range of a long-standing advisory, and the answer must hold those advisories. An answer that leaves out an advisory known to apply cannot be read as "nothing found". This is what tells an empty answer from "no advisories" (measured: a name that does not exist gives `[[]]`, exit 0, and the control advisory is in the answer when its pair is added).
 
 **From answers to records.** A withdrawn advisory is dropped. For each remaining advisory, each of its vulnerabilities that is `npm`, names a package in the lock file, and whose range some locked version of that package satisfies becomes one record in the shape the alert listing gives: `state` `open`, the package, ecosystem `npm`, `manifest_path` **`bun.lock`**, the advisory id, CVE id, severity and summary, the range, the patched version, and a link built from the checked id (`https://github.com/advisories/<ghsa_id>`; no URL is taken from the answer). The scope is written as "not determined": whether a package serves the running server or only the tooling is not computed (section 9). A record with no patched version is logged by name and files nothing, as an alert with none does today.
 
@@ -168,7 +168,7 @@ It runs **inside the existing daily job and inside the existing script**: one jo
 6. **No URL from an answer is used.** The link is built from the checked id.
 7. **Fields that decide nothing are data.** Severity, summary and CVE id are written into a table through the existing cell escape.
 8. **The source's own matching is not trusted to include.** A record is made only when a locked version satisfies the range, by `semver`, here; and the sweep's existing narrowing checks again before an issue is filed.
-9. **The source's silence is not trusted either**, as far as one control pair per query can show (section 7 says how far that is).
+9. **The source's silence is not trusted either**, as far as the control pairs in each query can show (section 7 says how far that is).
 10. **A marker is trusted only on what the automation wrote**, pacing, and the `concurrency` group: unchanged.
 11. **No dependency code runs, and no new program**: `bun audit` is not used; the install stays `--frozen-lockfile --ignore-scripts`.
 
@@ -212,7 +212,7 @@ It runs **inside the existing daily job and inside the existing script**: one jo
 | Dependabot security updates | Disabled | Off (`{"enabled":false,"paused":false}`) | Nothing. Leave it off |
 | Job permissions, workflow triggers | Unchanged | n/a | Nothing |
 
-Merging the pull request that builds this is the owner's, as always. One thing to know before that merge: with the lock file as it is today, the first run files three public issues (section 1).
+Merging the pull request that builds this is the owner's, as always. With the lock file as it is on `main` since pull request 22, the first run files nothing (section 1).
 
 ## 9. Not proposed
 
@@ -234,4 +234,46 @@ By the review model, before any code. Each round's verdict and findings are reco
 - **Round d2 (`e7d5700`): fail, 1 finding.** The round returned a review. It repeated the first round's judgments: "Can the approach work? Yes. No replacement mechanism is required"; candidate A "is the best evaluated choice under the settled constraints"; no route at design level from untrusted text to execution, a file, a `gh` option, a placeholder or a forged marker; the both-paths rule "is sufficient in the design"; no permission beyond what the job uses. It listed nothing as out of the stated scope. It marked the files to be written as not reviewed.
   1. MEDIUM, the same finding: the answer above "explains the violation but does not resolve it", because the rule in `AGENTS.md` has no exception for a workflow that has not run, and deferring to NOR-686 does not make this change meet it: **explicitly answered; not fixed; there is no third round.** What the reviewer says of the rule is right, and it is true of the job as it is on `main` today: this change does not touch the timeout line and does not make the job meet the rule. It is not a security point and does not show the design would not work. Two things bound it. The time this change adds is stated as measured (section 7). And the order of work can close most of it: the existing job is scheduled daily at 06:17 UTC, so once those runs exist the timeout can be sized from them under NOR-686 before the pull request that builds this is merged, and checked again from the first runs that include this addition. Whether the build waits for that re-sizing is the owner's decision when the build is taken up; the finding stays open until NOR-686 is done.
 
-**Where the design stands after two rounds.** Both rounds returned a review and both verdicts were fail, each on the one timeout finding. No finding was raised against the choice of advisory source, the order of reads, the checks, the both-paths rule, the permissions or the threat model. Nothing in section 2 is built.
+**Where the design stands after two rounds.** Both rounds returned a review and both verdicts were fail, each on the one timeout finding. No finding was raised against the choice of advisory source, the order of reads, the checks, the both-paths rule, the permissions or the threat model. Nothing in section 2 was built when the rounds ended.
+
+## 11. Design corrections after review
+
+Two corrections, made after the two rounds and before the build. Both tighten the design; neither changes the source, the permissions or the threat model. They were not sent back for a third design round: the review of the built change reads them.
+
+**Correction 1: the query carries ONE `affects` parameter.** The pairs are joined by commas into a single value, and that value is percent-encoded as a whole: `advisories?ecosystem=npm&per_page=100&affects=a%401.0.0%2Cb%402.0.0`. Repeating the parameter looks equivalent and is not: the endpoint keeps only the last one. Measured on 2026-11-22 with two pairs that each have advisories, `minimist@0.0.8` and `lodash@4.17.20`:
+
+| Request | Advisories returned |
+| --- | --- |
+| `affects=minimist@0.0.8,lodash@4.17.20` (one parameter) | 8: both packages' |
+| `affects=minimist@0.0.8&affects=lodash@4.17.20` (repeated) | 5: `lodash`'s only |
+| `affects=lodash@4.17.20&affects=minimist@0.0.8` (repeated, other order) | 3: `minimist`'s only |
+
+A query built the repeated way would ask about one pair in a hundred and report the rest clean, with exit 0. The measurements of section 3 all used the one-parameter form, so they stand. A test pins it: the path built for two pairs holds exactly one `affects=`. The control pairs below would also catch it at run time, because their advisories would be missing from the answer.
+
+**Correction 2: two control pairs, and what each outcome means.** Section 4 had one control pair and a red run if its advisory was ever withdrawn. Every query now carries two pairs that are known to be in range of an advisory, on two unrelated packages:
+
+| Control pair | Advisory | Published | Range it is in |
+| --- | --- | --- | --- |
+| `minimist@0.0.8` | `GHSA-xvch-5gv4-984h` | 2022-03-18 | `< 0.2.4` |
+| `lodash@4.17.20` | `GHSA-35jh-r3h4-6jhm` | 2021-05-06 | `< 4.17.21` |
+
+Both were read from the endpoint on 2026-11-22: reviewed, not withdrawn. For each query's answer, each control is in one of three states:
+
+- **good**: its advisory is in the answer, is not withdrawn, and lists a range for the control's package that the control's version satisfies;
+- **stale**: its advisory is in the answer, but is marked withdrawn or no longer lists such a range;
+- **absent**: its advisory is not in the answer at all.
+
+What the run does:
+
+| The two controls are | The read | The run |
+| --- | --- | --- |
+| both good | stands | carries on |
+| either one absent | **failed** | stops before any write: no issue is filed, edited or cleared, and the job is red |
+| both stale | **failed** | the same: nothing is left to vouch for the answer |
+| one good, one stale | stands, on the good one | does all its work, then ends red naming the control to replace |
+
+Why absent is a failed read even when the other control is good: a withdrawn advisory stays in the listing with its `withdrawn_at` date (measured: advisories withdrawn in 2020 and 2021 are still returned), so a control that is missing altogether was left out by the answer, and an answer that leaves out one advisory known to apply may have left out others. Why one stale control does not stop the work: the other still shows the query was answered, and stopping would blind the sweep for a reason that has nothing to do with this repository. Why the run is red all the same: a control that needs replacing must not wait in a log nobody reads until the second one goes too.
+
+A control is an ordinary pair to the rest of the run. Its advisory becomes a record only if the lock file itself holds that package at a version in range, like any other advisory; nothing is dropped by name.
+
+Each query is at most 100 pairs from the lock file plus the two controls, and its whole `affects` value stays under the 4,000-character budget of section 4.
