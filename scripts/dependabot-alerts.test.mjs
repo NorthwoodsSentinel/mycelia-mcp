@@ -1,13 +1,43 @@
-// Tests for dependabot-alerts.mjs (#2233) — both the pure grouping/formatting
-// helpers and `main()`'s orchestration, the latter driven through the injected
-// spawn function so no `gh` process is ever started.
+// Tests for scripts/dependabot-alerts.mjs, the daily alert sweep: the pure
+// grouping and formatting helpers, and `main()` driven through an injected
+// `spawnSync`, so no `gh` process is ever started.
 //
-// `main()` is covered rather than left to `workflow_dispatch` because a
-// production trigger is not a test (Copilot): everything that can go wrong in
-// the orchestration — a paginated alert feed, a manifest that has moved on, a
-// half-written board card, a comment posted twice — goes wrong only against the
-// real API, where nothing would be asserted.
-// Run via `npm run test:scripts`.
+// In this repo: the MCP Inspector's test file (modelcontextprotocol/inspector
+// at commit 7df76f6eea9ea425891289333837878ebb31ae6a,
+// scripts/dependabot-alerts.test.mjs, blob
+// 8493d3c40695e6d82568aafda0aa357af1d7ded6), by copy then edit: the unchanged
+// file is this file's first commit here. Record: PROVENANCE.md, "Sweeps". A
+// comment that cites "(Copilot)" or a "#NNNN" is the source's.
+//
+// Edits, following the script's (its header numbers them):
+//
+//   - The cases for the board, the second token and the milestone are removed
+//     with the code (`pickMilestone`, the three board cases, the two token
+//     helpers that wrapped every `main()` call).
+//   - The cases for `overrideAncestors` and `scopedOverrideExample` are
+//     removed with the two functions, and the case for a package that is both
+//     declared and nested asserts the top-level `overrides` form.
+//   - A fixture's lockfile is a `bun.lock` (`lockOf`, `lockWith`), and an
+//     alert's default manifest is `package.json`.
+//   - The cases that used a second lockfile in a sub-folder are rewritten: an
+//     alert that names any path outside the fixed list is not checked and its
+//     issue is not cleared, and the source's "manifest is gone, so clear the
+//     issue" case is now "the manifest is unknown, so leave the issue alone".
+//   - The fake answers the REST shapes. An issue or a comment in a fixture
+//     that states no `user` is given the automation's authorship (and an issue
+//     its labels), so the source's fixtures stay as written; the cases for
+//     addition A1 state their own.
+//   - The fake throws on any program but `gh` and on any `gh` call it does not
+//     know, where the source's answered every unknown call with success.
+//   - `main` below is the script's `main` with a writer that does not wait
+//     (addition A3), so the source's call sites stay as written and no test
+//     sleeps.
+//   - Cases written in this repo are under "Written in this repo", at the end.
+//
+// The source's reason for covering `main()` here, unchanged: a production
+// trigger is not a test (Copilot): everything that can go wrong in the
+// orchestration goes wrong only against the real API, where nothing would be
+// asserted. Run via `npm run test:scripts`, which names this file by path.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,14 +47,15 @@ import { tmpdir } from "node:os";
 import {
   advisoryKey,
   parseClearedDate,
+  ISSUE_LABELS,
+  KNOWN_MANIFESTS,
+  LOCKFILE,
+  PLACEMENT_DOC,
   SUPPORTED_ECOSYSTEM,
-  PRIORITY_FIELD_ID,
-  STATUS_FIELD_ID,
+  SWEEP_LABELS,
+  TARGET_BRANCH,
   buildClearedBody,
-  overrideAncestors,
-  scopedOverrideExample,
   buildCommentMarker,
-  pickMilestone,
   narrowToApplicable,
   lockfileEntries,
   remediation,
@@ -37,18 +68,32 @@ import {
   isPermissionDenied,
   isRateLimited,
   lockfileVersions,
-  main,
+  main as sweepMain,
   mergeGhsas,
   parseCommentMarker,
   parseMarker,
   toSemverRange,
 } from "./dependabot-alerts.mjs";
+import { pacedWrites, WRITE_PAUSE_MS } from "./lib/paced-writes.mjs";
+
+/**
+ * The script's `main`, with a writer whose pause does nothing: the pacing is
+ * real in a run and has its own cases below, and no other test should wait a
+ * second for each write after the first.
+ */
+const main = (repo, spawn, today) =>
+  sweepMain(
+    repo,
+    spawn,
+    today,
+    pacedWrites(() => {}),
+  );
 
 /** Shaped like a real `GET /repos/{o}/{r}/dependabot/alerts` entry. */
 function alert({
   ghsa,
   pkg = "fast-uri",
-  manifest = "package-lock.json",
+  manifest = "package.json",
   fixed = "3.1.6",
   severity = "high",
   range = ">= 3.0.0, < 3.1.6",
@@ -145,8 +190,8 @@ test("groupAlerts collapses advisories into one entry per bump", () => {
     grouped.map((g) => [g.package, g.manifestPath, g.fixedIn, g.ghsas.length]),
     [
       ["browserslist", "clients/tui/package-lock.json", "4.28.7", 1],
-      ["fast-uri", "package-lock.json", "3.1.6", 4],
-      ["qs", "package-lock.json", "6.16.0", 1],
+      ["fast-uri", "package.json", "3.1.6", 4],
+      ["qs", "package.json", "6.16.0", 1],
     ],
   );
   // GHSAs are sorted within a group so the marker is stable across runs.
@@ -191,17 +236,17 @@ test("groupAlerts drops closed alerts and ones with no patched version", () => {
 test("buildMarker and parseMarker round-trip, sorting the GHSA list", () => {
   const marker = buildMarker({
     package: "fast-uri",
-    manifestPath: "package-lock.json",
+    manifestPath: "package.json",
     fixedIn: "3.1.6",
     ghsas: ["GHSA-b", "GHSA-a"],
   });
   assert.equal(
     marker,
-    "<!-- dependabot-alerts: pkg=fast-uri; manifest=package-lock.json; fixed=3.1.6; ghsas=GHSA-a,GHSA-b -->",
+    "<!-- dependabot-alerts: pkg=fast-uri; manifest=package.json; fixed=3.1.6; ghsas=GHSA-a,GHSA-b -->",
   );
   assert.deepEqual(parseMarker(`${marker}\nbody text`), {
     package: "fast-uri",
-    manifestPath: "package-lock.json",
+    manifestPath: "package.json",
     fixedIn: "3.1.6",
     ghsas: ["GHSA-a", "GHSA-b"],
   });
@@ -377,31 +422,6 @@ test("buildIssueBody escapes a disjoint range so the table survives it", () => {
   assert.ok(row.includes(String.raw`\|\|`), "the range's own pipes survive");
 });
 
-test("pickMilestone takes the nearest due date, never an undated bucket", () => {
-  // jq sorts null before every string, so `sort_by(.due_on) | .[0]` over this
-  // list would return "Backlog" — an open bucket with no release date at all.
-  const milestones = [
-    { title: "Backlog", state: "open", due_on: null },
-    { title: "v2.7.0", state: "open", due_on: "2026-09-16T00:00:00Z" },
-    { title: "v2.6.0", state: "open", due_on: "2026-09-09T00:00:00Z" },
-  ];
-  assert.equal(pickMilestone(milestones), "v2.6.0");
-});
-
-test("pickMilestone ignores closed milestones and empty input", () => {
-  assert.equal(
-    pickMilestone([
-      { title: "v2.5.0", state: "closed", due_on: "2026-01-01T00:00:00Z" },
-    ]),
-    null,
-  );
-  // Nothing dated and open means no bucket to take: filed unmilestoned, and
-  // the board write is skipped so triage places it.
-  assert.equal(pickMilestone([{ title: "Backlog", due_on: null }]), null);
-  assert.equal(pickMilestone([]), null);
-  assert.equal(pickMilestone(undefined), null);
-});
-
 test("buildIssueTitle names the bump and pluralizes the advisory count", () => {
   const [many] = groupAlerts([
     alert({ ghsa: "GHSA-a" }),
@@ -409,12 +429,12 @@ test("buildIssueTitle names the bump and pluralizes the advisory count", () => {
   ]);
   assert.equal(
     buildIssueTitle(many),
-    "chore(deps): bump `fast-uri` to `3.1.6` in `package-lock.json` (2 advisories)",
+    "chore(deps): bump `fast-uri` to `3.1.6` in `package.json` (2 advisories)",
   );
   const [one] = groupAlerts([alert({ ghsa: "GHSA-a" })]);
   assert.equal(
     buildIssueTitle(one),
-    "chore(deps): bump `fast-uri` to `3.1.6` in `package-lock.json` (1 advisory)",
+    "chore(deps): bump `fast-uri` to `3.1.6` in `package.json` (1 advisory)",
   );
 });
 
@@ -426,7 +446,7 @@ test("buildIssueBody leads with the marker and asks for an overrides pin when tr
   const body = buildIssueBody(group, nested());
 
   assert.ok(body.startsWith(buildMarker(group)));
-  assert.match(body, /\| Vulnerable on `v2\/main` \| `3\.1\.5` \|/);
+  assert.match(body, /\| Vulnerable on `main` \| `3\.1\.5` \|/);
   assert.match(body, /\| Fixed in \| `3\.1\.6` \|/);
   assert.match(body, /GHSA-a/);
   assert.match(body, /CVE-2026-1/);
@@ -491,10 +511,15 @@ test("buildIssueBody asks for BOTH edits when declared and nested copies are vul
   });
   assert.match(body, /Both edits are needed/);
   assert.match(body, /1\. \*\*Raise the declared range/);
-  assert.match(body, /2\. \*\*Add a parent-scoped \[`overrides`\]/);
-  // A package-wide pin would be rejected: the manifest declares it directly.
-  assert.match(body, /EOVERRIDE/);
-  assert.match(body, /"ajv": \{\n\s+"fast-uri": "3\.1\.6"/);
+  assert.match(body, /2\. \*\*Add an \[`overrides`\]/);
+  // In this repo: the top-level form only. The pinned Bun ignores a nested
+  // entry and accepts a top-level one beside a direct dependency (measured;
+  // the script's header, edit 9), so the body gives no parent-scoped example
+  // and does not speak of npm's EOVERRIDE.
+  assert.match(body, /at the top level of `overrides`/);
+  assert.match(body, /the declared one included/);
+  assert.doesNotMatch(body, /EOVERRIDE/);
+  assert.doesNotMatch(body, /"ajv": \{/);
   // The table names the copies, so the maintainer can see why.
   assert.match(
     body,
@@ -567,31 +592,61 @@ test("buildNewAdvisoryComment lists only the newly-seen advisories", () => {
 // temp directory it populates itself.
 // ---------------------------------------------------------------------------
 
+/** The account the REST endpoints name as the author of the sweep's writes. */
+const BOT = { login: "github-actions[bot]", type: "Bot" };
+
+/** A fixture issue as the REST listing returns one this sweep filed. */
+const asSweepIssue = (issue) => ({
+  user: BOT,
+  labels: ISSUE_LABELS.map((name) => ({ name })),
+  ...issue,
+});
+
+/** A fixture comment as the REST listing returns one this sweep wrote. */
+const asBotComment = (comment) => ({ user: BOT, ...comment });
+
 /**
  * A `spawnSync` stand-in. `gh` responses are matched on the argument list, in
  * the order the handlers are declared, and every call is recorded.
+ *
+ * In this repo: any program but `gh`, and any `gh` call not listed here,
+ * throws. `issues` and `comments` are given the automation's authorship
+ * unless a fixture states its own `user` (and, for an issue, `labels`).
  */
 function fakeSpawn({
   securityFixes = { enabled: false, paused: false },
   securityFixesStatus = 0,
   securityFixesStderr = "",
+  // A raw answer to the setting lookup, overriding the three above.
+  securityFixesResponse,
   alertPages = [[]],
   // A raw alert-listing response, overriding `alertPages` — for the failure
   // paths, where `gh` exits non-zero or hands back something unparseable.
   alertResponse,
   issues = [],
+  // A raw issue-listing response, overriding `issues`.
+  issuesResponse,
   comments = [],
-  milestone = "v2.6.0",
-  boardEditStatus = 0,
+  // A raw comment-listing response, overriding `comments`.
+  commentsResponse,
+  // The exit status of each kind of issue write.
+  createStatus = 0,
+  editStatus = 0,
+  commentStatus = 0,
 } = {}) {
   const calls = [];
   const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+  const written = (status, stdout = "") =>
+    status === 0 ? ok(stdout) : { status, stdout: "", stderr: "write blew up" };
 
   const spawn = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
+    if (cmd !== "gh") throw new Error(`unexpected program: ${cmd}`);
     const joined = args.join(" ");
 
     if (joined.includes("automated-security-fixes")) {
+      if (securityFixesResponse)
+        return { stdout: "", stderr: "", ...securityFixesResponse };
       return securityFixesStatus === 0
         ? ok(JSON.stringify(securityFixes))
         : {
@@ -605,43 +660,24 @@ function fakeSpawn({
       // `--slurp` yields one array PER PAGE; main() must flatten them.
       return ok(JSON.stringify(alertPages));
     }
-    if (joined.includes("milestones"))
-      return ok(
-        JSON.stringify(
-          milestone
-            ? [
-                {
-                  title: milestone,
-                  state: "open",
-                  due_on: "2026-09-09T00:00:00Z",
-                },
-              ]
-            : [],
-        ),
-      );
+    // `--slurp`, so one array per page.
+    if (args[0] === "api" && joined.includes("/comments?")) {
+      if (commentsResponse)
+        return { stdout: "", stderr: "", ...commentsResponse };
+      return ok(JSON.stringify([comments.map(asBotComment)]));
+    }
     // `--slurp`, so one array per page — `issues` may be a flat list or pages.
-    if (joined.includes("/issues?"))
-      return ok(JSON.stringify(Array.isArray(issues[0]) ? issues : [issues]));
-    if (args[0] === "issue" && args[1] === "view")
-      return ok(JSON.stringify({ comments }));
+    if (args[0] === "api" && joined.includes("/issues?")) {
+      if (issuesResponse) return { stdout: "", stderr: "", ...issuesResponse };
+      const pages = Array.isArray(issues[0]) ? issues : [issues];
+      return ok(JSON.stringify(pages.map((page) => page.map(asSweepIssue))));
+    }
     if (args[0] === "issue" && args[1] === "create")
-      return ok("https://github.com/o/r/issues/77");
-    if (args[0] === "project" && args[1] === "item-add")
-      return ok(JSON.stringify({ id: "PVTI_fake" }));
-    if (args[0] === "project" && args[1] === "field-list")
-      return ok(
-        JSON.stringify({
-          fields: [
-            { name: "Status", options: [{ name: "Todo", id: "todo-id" }] },
-            { name: "Priority", options: [{ name: "High", id: "high-id" }] },
-          ],
-        }),
-      );
-    if (args[0] === "project" && args[1] === "item-edit")
-      return boardEditStatus === 0
-        ? ok()
-        : { status: boardEditStatus, stdout: "", stderr: "field edit blew up" };
-    return ok();
+      return written(createStatus, "https://github.com/o/r/issues/77\n");
+    if (args[0] === "issue" && args[1] === "edit") return written(editStatus);
+    if (args[0] === "issue" && args[1] === "comment")
+      return written(commentStatus);
+    throw new Error(`unexpected gh call: ${joined}`);
   };
   spawn.calls = calls;
   return spawn;
@@ -668,7 +704,7 @@ function captureLog(run) {
   return lines;
 }
 
-/** Run `body` in a temp cwd populated with `files` (path -> JSON value). */
+/** Run `body` in a temp cwd populated with `files` (path -> JSON value, or text). */
 function inTempRepo(files, body) {
   const dir = mkdtempSync(join(tmpdir(), "dependabot-alerts-"));
   const cwd = process.cwd();
@@ -676,7 +712,12 @@ function inTempRepo(files, body) {
     for (const [path, value] of Object.entries(files)) {
       const full = join(dir, path);
       mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, JSON.stringify(value));
+      // In this repo: a string is written as it is, for a lockfile in the
+      // text form Bun writes; anything else as JSON.
+      writeFileSync(
+        full,
+        typeof value === "string" ? value : JSON.stringify(value),
+      );
     }
     process.chdir(dir);
     return body();
@@ -696,33 +737,23 @@ const asInstalled = (version = "3.1.5") => ({
   declared: false,
 });
 
-/** A lockfile holding one transitive copy of `pkg` at `version`. */
-const lockWith = (pkg, version) => ({
-  lockfileVersion: 3,
-  packages: { "": { dependencies: {} }, [`node_modules/${pkg}`]: { version } },
+/**
+ * A `bun.lock` holding one hoisted, undeclared copy of each package named, at
+ * the version given. `inTempRepo` writes it as JSON, which the reader takes.
+ */
+const lockOf = (versions) => ({
+  lockfileVersion: 1,
+  workspaces: { "": { name: "fixture", dependencies: {} } },
+  packages: Object.fromEntries(
+    Object.entries(versions).map(([pkg, version]) => [
+      pkg,
+      [`${pkg}@${version}`, "", {}, "sha512-fixture"],
+    ]),
+  ),
 });
 
-/** Without a PAT the board is never touched, which most tests want. */
-function withoutProjectToken(body) {
-  const saved = process.env.PROJECT_TOKEN;
-  delete process.env.PROJECT_TOKEN;
-  try {
-    return body();
-  } finally {
-    if (saved !== undefined) process.env.PROJECT_TOKEN = saved;
-  }
-}
-
-function withProjectToken(body) {
-  const saved = process.env.PROJECT_TOKEN;
-  process.env.PROJECT_TOKEN = "pat";
-  try {
-    return body();
-  } finally {
-    if (saved === undefined) delete process.env.PROJECT_TOKEN;
-    else process.env.PROJECT_TOKEN = saved;
-  }
-}
+/** A lockfile holding one transitive copy of `pkg` at `version`. */
+const lockWith = (pkg, version) => lockOf({ [pkg]: version });
 
 test("main files one issue per bump, flattening a paginated alert feed", () => {
   // Two pages, as `--slurp` returns them: a single JSON.parse of concatenated
@@ -737,7 +768,6 @@ test("main files one issue per bump, flattening a paginated alert feed", () => {
         alert({
           ghsa: "GHSA-c",
           pkg: "browserslist",
-          manifest: "clients/tui/package-lock.json",
           fixed: "4.28.7",
           range: "<= 4.28.6",
         }),
@@ -747,10 +777,9 @@ test("main files one issue per bump, flattening a paginated alert feed", () => {
 
   const log = inTempRepo(
     {
-      "package-lock.json": lockWith("fast-uri", "3.1.5"),
-      "clients/tui/package-lock.json": lockWith("browserslist", "4.28.2"),
+      "bun.lock": lockOf({ "fast-uri": "3.1.5", browserslist: "4.28.2" }),
     },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+    () => captureLog(() => main("o/r", spawn)),
   );
 
   const created = ghCalls(spawn, "create");
@@ -764,31 +793,49 @@ test("main files one issue per bump, flattening a paginated alert feed", () => {
   );
   const body = fastUri.args[fastUri.args.indexOf("--body") + 1];
   assert.deepEqual(parseMarker(body).ghsas, ["GHSA-a", "GHSA-b"]);
-  assert.deepEqual(created[0].args.slice(-2), ["--milestone", "v2.6.0"]);
+  // In this repo: no milestone; the three labels, and the body last.
+  for (const call of created) {
+    assert.deepEqual(
+      call.args.filter((_, i) => call.args[i - 1] === "--label"),
+      ISSUE_LABELS,
+    );
+    assert.equal(call.args.at(-2), "--body");
+    assert.equal(call.args.includes("--milestone"), false);
+  }
   assert.ok(log.some((l) => l.includes("filed")));
 });
 
 test("main skips an alert already out of range on the checked-out branch", () => {
   const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.6") },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.6") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.equal(ghCall(spawn, "create"), undefined);
   assert.ok(log.some((l) => l.includes("already out of range")));
 });
 
-test("main skips an alert whose manifest is absent from the checkout", () => {
+test("main does not check an alert whose manifest it does not know", () => {
+  // In this repo: the source read the path and, finding no file, skipped the
+  // alert as "absent". Here the path is compared with a fixed list and is not
+  // read at all, so there is nothing to find or to miss.
   const spawn = fakeSpawn({
     alertPages: [
       [alert({ ghsa: "GHSA-a", manifest: "gone/package-lock.json" })],
     ],
   });
-  const log = inTempRepo({}, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.equal(ghCall(spawn, "create"), undefined);
-  assert.ok(log.some((l) => l.includes("absent on v2/main")));
+  assert.ok(
+    log.some(
+      (l) =>
+        l.includes('"gone/package-lock.json"') &&
+        l.includes("not a manifest this sweep knows") &&
+        l.includes("GHSA-a"),
+    ),
+    `expected an unknown-manifest line, got: ${log.join(" | ")}`,
+  );
 });
 
 test("main is a complete no-op on a second run", () => {
@@ -803,9 +850,8 @@ test("main is a complete no-op on a second run", () => {
       },
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.equal(ghCall(spawn, "create"), undefined);
   assert.equal(ghCall(spawn, "comment"), undefined);
@@ -826,12 +872,8 @@ test("main will not update an issue whose bump differs, even for the same packag
       },
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () =>
-      withoutProjectToken(() =>
-        captureLog(() => main("o/r", spawn, "2026-09-04")),
-      ),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   assert.ok(ghCall(spawn, "create"), "a different bump gets its own issue");
   // ...and the 3.1.6 issue, whose alert is no longer in the open feed, is
@@ -857,8 +899,8 @@ test("main comments a new advisory BEFORE rewriting the marker", () => {
       },
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
 
   const order = spawn.calls
@@ -894,8 +936,8 @@ test("main does not repeat a comment it already posted", () => {
     ],
     comments: [{ body: `${buildCommentMarker(["GHSA-b"])}\nsaid already` }],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.equal(ghCall(spawn, "comment"), undefined);
   // The marker still gets brought up to date.
@@ -924,8 +966,8 @@ test("main announces only the advisories no comment has claimed yet", () => {
     ],
     comments: [{ body: `${buildCommentMarker(["GHSA-b"])}\nannounced b` }],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
 
   const comment = ghCall(spawn, "comment");
@@ -947,8 +989,8 @@ test("main refreshes the title when an issue grows another advisory", () => {
       },
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   const edit = ghCall(spawn, "edit");
   // Filed as "(1 advisory)"; editing only the body would leave it saying so.
@@ -1000,7 +1042,7 @@ const trackedIssue = () => ({
   body: buildIssueBody(
     {
       package: "fast-uri",
-      manifestPath: "package-lock.json",
+      manifestPath: "package.json",
       fixedIn: "3.1.6",
       ghsas: ["GHSA-a"],
       severity: "high",
@@ -1014,8 +1056,8 @@ function assertListingFailureTouchesNothing(alertResponse, message) {
   const spawn = fakeSpawn({ alertResponse, issues: [trackedIssue()] });
   assert.throws(
     () =>
-      inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-        withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+      inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+        captureLog(() => main("o/r", spawn)),
       ),
     message,
   );
@@ -1080,29 +1122,8 @@ test("main throws, touching nothing, on an alert listing that is not a list of p
   );
 });
 
-test("main leaves an unmilestoned issue off the board for triage", () => {
-  const spawn = fakeSpawn({
-    alertPages: [[alert({ ghsa: "GHSA-a" })]],
-    milestone: "",
-  });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () => withProjectToken(() => captureLog(() => main("o/r", spawn))),
-  );
-  assert.ok(ghCall(spawn, "create"));
-  // `Incoming` <=> no milestone: boarding it at Todo would assert an approval
-  // the invariant reads off the milestone.
-  assert.equal(
-    spawn.calls.find(
-      (c) => c.args[0] === "project" && c.args[1] === "item-add",
-    ),
-    undefined,
-  );
-  assert.ok(log.some((l) => l.includes("unmilestoned and unboarded")));
-});
-
 test("main refreshes an issue whose exposure shrank, without commenting", () => {
-  // Filed when both advisories applied; `v2/main` has since moved to 3.1.0,
+  // Filed when both advisories applied; `main` has since moved to 3.1.0,
   // which is out of range of the narrow one. Nothing is NEW, so `added` is
   // empty — but the body still claims an advisory that no longer applies.
   const [filed] = groupAlerts([
@@ -1124,9 +1145,8 @@ test("main refreshes an issue whose exposure shrank, without commenting", () => 
       },
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.0") },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.0") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
 
   // A comment is for genuinely new advisories, and there are none.
@@ -1144,7 +1164,10 @@ test("main refreshes an issue whose exposure shrank, without commenting", () => 
   assert.ok(log.some((l) => l.includes("refreshed #41")));
 });
 
-test("main clears an open issue when the manifest is gone", () => {
+test("main leaves an open issue alone when its alert names a manifest it does not know", () => {
+  // In this repo: the source cleared this issue, on the strength of a missing
+  // file. A path this sweep does not know is not evidence that the exposure
+  // went away, so nothing is written.
   const [group] = groupAlerts([
     alert({ ghsa: "GHSA-a", manifest: "clients/gone/package-lock.json" }),
   ]);
@@ -1161,20 +1184,13 @@ test("main clears an open issue when the manifest is gone", () => {
     ],
   });
   const log = inTempRepo({}, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    ),
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
 
-  const edit = ghCall(spawn, "edit");
-  assert.ok(edit, "the stale issue is rewritten, not silently skipped");
-  const body = edit.args[edit.args.indexOf("--body") + 1];
-  assert.match(body, /No longer applicable on `v2\/main` as of 2026-09-04/);
-  assert.match(body, /no longer part of this repo/);
-  // The marker survives, so the issue is reused if the advisory comes back.
-  assert.deepEqual(parseMarker(body).ghsas, ["GHSA-a"]);
+  assert.equal(ghCall(spawn, "edit"), undefined, "the issue is not cleared");
   assert.equal(ghCall(spawn, "create"), undefined);
-  assert.ok(log.some((l) => l.includes("cleared #41")));
+  assert.equal(ghCall(spawn, "comment"), undefined);
+  assert.ok(log.some((l) => l.includes("not a manifest this sweep knows")));
 });
 
 test("main clears an open issue when every copy moved out of range", () => {
@@ -1189,12 +1205,8 @@ test("main clears an open issue when every copy moved out of range", () => {
       },
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.6") },
-    () =>
-      withoutProjectToken(() =>
-        captureLog(() => main("o/r", spawn, "2026-09-04")),
-      ),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.6") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   const edit = ghCall(spawn, "edit");
   assert.ok(edit);
@@ -1220,10 +1232,8 @@ test("main does not re-clear an issue it already cleared", () => {
       },
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.6") }, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    ),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.6") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   assert.equal(ghCall(spawn, "edit"), undefined);
   assert.equal(ghCall(spawn, "create"), undefined);
@@ -1231,8 +1241,8 @@ test("main does not re-clear an issue it already cleared", () => {
 
 test("main skips quietly when nothing applies and no issue is open", () => {
   const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.6") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.6") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.equal(ghCall(spawn, "edit"), undefined);
   assert.equal(ghCall(spawn, "create"), undefined);
@@ -1263,12 +1273,8 @@ test("main clears an issue when its last alert is fixed or dismissed", () => {
       },
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () =>
-      withoutProjectToken(() =>
-        captureLog(() => main("o/r", spawn, "2026-09-04")),
-      ),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   const edit = ghCall(spawn, "edit");
   assert.ok(edit, "the zero-alert run still reconciles open issues");
@@ -1299,10 +1305,8 @@ test("main reconciles a vanished group even while other groups remain", () => {
       },
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    ),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   assert.ok(ghCall(spawn, "create"), "the live bump is still filed");
   const edit = ghCall(spawn, "edit");
@@ -1317,11 +1321,11 @@ test("main does not re-clear a vanished group's issue on the next run", () => {
       {
         number: 41,
         title:
-          "chore(deps): bump `fast-uri` to `3.1.6` in `package-lock.json` (1 advisory)",
+          "chore(deps): bump `fast-uri` to `3.1.6` in `package.json` (1 advisory)",
         body: buildClearedBody(
           {
             package: "fast-uri",
-            manifestPath: "package-lock.json",
+            manifestPath: "package.json",
             fixedIn: "3.1.6",
           },
           {
@@ -1333,80 +1337,8 @@ test("main does not re-clear a vanished group's issue on the next run", () => {
       },
     ],
   });
-  inTempRepo({}, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    ),
-  );
+  inTempRepo({}, () => captureLog(() => main("o/r", spawn, "2026-09-04")));
   assert.equal(ghCall(spawn, "edit"), undefined);
-});
-
-test("main boards a filed issue at Todo/High using resolved option ids", () => {
-  // The acceptance-critical path: the two field edits that actually place the
-  // card. Previously only its failure modes were covered.
-  const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () => withProjectToken(() => captureLog(() => main("o/r", spawn))),
-  );
-
-  const add = spawn.calls.find(
-    (c) => c.args[0] === "project" && c.args[1] === "item-add",
-  );
-  assert.ok(add, "the card is added");
-  const edits = spawn.calls.filter(
-    (c) => c.args[0] === "project" && c.args[1] === "item-edit",
-  );
-  assert.equal(edits.length, 2, "Status and Priority are separate calls");
-  const optionOf = (call) =>
-    call.args[call.args.indexOf("--single-select-option-id") + 1];
-  const fieldOf = (call) => call.args[call.args.indexOf("--field-id") + 1];
-  assert.deepEqual(
-    edits.map((e) => [fieldOf(e), optionOf(e)]),
-    [
-      [STATUS_FIELD_ID, "todo-id"],
-      [PRIORITY_FIELD_ID, "high-id"],
-    ],
-  );
-  // Resolved by NAME at run time, never hardcoded.
-  assert.ok(
-    spawn.calls.some(
-      (c) => c.args[0] === "project" && c.args[1] === "field-list",
-    ),
-  );
-  assert.ok(log.some((l) => l.includes("boarded")));
-});
-
-test("overrideAncestors reads the parent chain, scoped names included", () => {
-  assert.deepEqual(
-    overrideAncestors("node_modules/ajv/node_modules/fast-uri"),
-    ["ajv"],
-  );
-  assert.deepEqual(
-    overrideAncestors(
-      "node_modules/@sc/a/node_modules/b/node_modules/fast-uri",
-    ),
-    ["@sc/a", "b"],
-  );
-  assert.deepEqual(overrideAncestors("node_modules/fast-uri"), []);
-});
-
-test("scopedOverrideExample nests each vulnerable copy under its parents", () => {
-  const json = scopedOverrideExample(
-    [
-      { path: "node_modules/fast-uri", hoisted: true },
-      { path: "node_modules/ajv/node_modules/fast-uri", hoisted: false },
-      { path: "node_modules/@sc/x/node_modules/fast-uri", hoisted: false },
-    ],
-    { package: "fast-uri", fixedIn: "3.1.6" },
-  );
-  // The hoisted copy is the declared one and gets no override entry.
-  assert.deepEqual(JSON.parse(json), {
-    overrides: {
-      ajv: { "fast-uri": "3.1.6" },
-      "@sc/x": { "fast-uri": "3.1.6" },
-    },
-  });
 });
 
 test("groupAlerts records the ecosystem so non-npm alerts are identifiable", () => {
@@ -1423,8 +1355,9 @@ test("groupAlerts records the ecosystem so non-npm alerts are identifiable", () 
 });
 
 test("main skips a non-npm alert loudly instead of crashing on its manifest", () => {
-  // ⚠️ This repo has a Dockerfile, so this is reachable. Parsing it as a
-  // lockfile threw and aborted the entire sweep before any npm group ran.
+  // The source's case (its repository has a Dockerfile): parsing that as a
+  // lockfile threw and aborted the entire sweep before any npm group ran. Here
+  // the same holds for an alert on a workflow's action.
   const spawn = fakeSpawn({
     alertPages: [
       [
@@ -1440,9 +1373,9 @@ test("main skips a non-npm alert loudly instead of crashing on its manifest", ()
   });
   const log = inTempRepo(
     {
-      "package-lock.json": lockWith("fast-uri", "3.1.5"),
+      "bun.lock": lockWith("fast-uri", "3.1.5"),
     },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+    () => captureLog(() => main("o/r", spawn)),
   );
 
   // The npm bump is still filed — the non-npm alert must not abort the run.
@@ -1480,10 +1413,8 @@ test("main says superseded, not fixed, when the GHSA is still open elsewhere", (
       },
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    ),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   const edit = ghCall(spawn, "edit");
   assert.ok(edit);
@@ -1514,9 +1445,8 @@ test("main omits the security-PR claim when the token could not read it", () => 
     securityFixesStderr: "gh: HTTP 403: Resource not accessible by integration",
     alertPages: [[alert({ ghsa: "GHSA-a" })]],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.ok(log.some((l) => l.includes("UNVERIFIED")));
   const create = ghCall(spawn, "create");
@@ -1545,12 +1475,8 @@ test("main will not stand down an open alert that lost its patched version", () 
       },
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () =>
-      withoutProjectToken(() =>
-        captureLog(() => main("o/r", spawn, "2026-09-04")),
-      ),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   // Nothing to bump to means no replacement issue exists, so "superseded" would
   // be false and clearing would stand down a live exposure nothing is tracking.
@@ -1575,7 +1501,7 @@ test("a cleared issue is not re-edited on a LATER day", () => {
   const cleared = buildClearedBody(
     {
       package: "fast-uri",
-      manifestPath: "package-lock.json",
+      manifestPath: "package.json",
       fixedIn: "3.1.6",
     },
     {
@@ -1589,10 +1515,8 @@ test("a cleared issue is not re-edited on a LATER day", () => {
     issues: [{ number: 41, title: buildIssueTitle(group), body: cleared }],
   });
   inTempRepo({}, () =>
-    withoutProjectToken(() =>
-      // A DIFFERENT day from the one the body records.
-      captureLog(() => main("o/r", spawn, "2026-09-11")),
-    ),
+    // A DIFFERENT day from the one the body records.
+    captureLog(() => main("o/r", spawn, "2026-09-11")),
   );
   assert.equal(ghCall(spawn, "edit"), undefined);
 });
@@ -1603,7 +1527,7 @@ test("a cleared issue takes the new date when its reason changes", () => {
   const cleared = buildClearedBody(
     {
       package: "fast-uri",
-      manifestPath: "package-lock.json",
+      manifestPath: "package.json",
       fixedIn: "3.1.6",
     },
     { ghsas: ["GHSA-a"], reason: "an older reason", today: "2026-09-04" },
@@ -1612,11 +1536,7 @@ test("a cleared issue takes the new date when its reason changes", () => {
     alertPages: [[]],
     issues: [{ number: 41, title: "t", body: cleared }],
   });
-  inTempRepo({}, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-11")),
-    ),
-  );
+  inTempRepo({}, () => captureLog(() => main("o/r", spawn, "2026-09-11")));
   const edit = ghCall(spawn, "edit");
   assert.ok(edit, "a changed reason is still written");
   assert.equal(
@@ -1627,7 +1547,7 @@ test("a cleared issue takes the new date when its reason changes", () => {
 
 test("parseClearedDate reads the date back, and only from a cleared body", () => {
   const body = buildClearedBody(
-    { package: "p", manifestPath: "package-lock.json", fixedIn: "1.0.0" },
+    { package: "p", manifestPath: "package.json", fixedIn: "1.0.0" },
     { ghsas: ["GHSA-a"], reason: "why", today: "2026-09-04" },
   );
   assert.equal(parseClearedDate(body), "2026-09-04");
@@ -1654,11 +1574,9 @@ test("main does not clear an issue when the lockfile cannot be parsed", () => {
   const cwd = process.cwd();
   let log;
   try {
-    writeFileSync(join(dir, "package-lock.json"), "{ truncated…");
+    writeFileSync(join(dir, "bun.lock"), "{ truncated…");
     process.chdir(dir);
-    log = withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    );
+    log = captureLog(() => main("o/r", spawn, "2026-09-04"));
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -1669,7 +1587,8 @@ test("main does not clear an issue when the lockfile cannot be parsed", () => {
   assert.ok(
     log.some(
       (l) =>
-        l.includes("could not be parsed") && l.includes("WITHOUT clearing"),
+        l.includes("could not be read or parsed") &&
+        l.includes("WITHOUT clearing"),
     ),
     `expected a parse-failure line, got: ${log.join(" | ")}`,
   );
@@ -1677,16 +1596,18 @@ test("main does not clear an issue when the lockfile cannot be parsed", () => {
 
 test("advisoryKey distinguishes the same GHSA in different manifests", () => {
   assert.notEqual(
-    advisoryKey("fast-uri", "package-lock.json", "GHSA-a"),
+    advisoryKey("fast-uri", "package.json", "GHSA-a"),
     advisoryKey("fast-uri", "clients/tui/package-lock.json", "GHSA-a"),
   );
 });
 
 test("another manifest's alert cannot vouch for this one when clearing", () => {
-  // The same GHSA legitimately covers the root install and a client's. Here the
-  // ROOT alert lost its patched version while the TUI one is still filable —
-  // keying on the GHSA alone would let the TUI group vouch for the root issue
-  // and clear it, even though the root alert is open with no bump available.
+  // The same GHSA can be reported against more than one manifest; in this repo
+  // the two the sweep knows are `package.json` and `bun.lock`. Here the
+  // `package.json` alert lost its patched version while the `bun.lock` one is
+  // still filable — keying on the GHSA alone would let the second vouch for the
+  // first's issue and clear it, even though that alert is open with no bump
+  // available.
   const [rootFiled] = groupAlerts([alert({ ghsa: "GHSA-a" })]);
   const rootUnpatched = alert({ ghsa: "GHSA-a" });
   rootUnpatched.security_vulnerability.first_patched_version = null;
@@ -1697,7 +1618,7 @@ test("another manifest's alert cannot vouch for this one when clearing", () => {
         rootUnpatched,
         alert({
           ghsa: "GHSA-a",
-          manifest: "clients/tui/package-lock.json",
+          manifest: "bun.lock",
           range: "< 3.1.6",
         }),
       ],
@@ -1712,16 +1633,12 @@ test("another manifest's alert cannot vouch for this one when clearing", () => {
   });
   const log = inTempRepo(
     {
-      "package-lock.json": lockWith("fast-uri", "3.1.5"),
-      "clients/tui/package-lock.json": lockWith("fast-uri", "3.1.5"),
+      "bun.lock": lockWith("fast-uri", "3.1.5"),
     },
-    () =>
-      withoutProjectToken(() =>
-        captureLog(() => main("o/r", spawn, "2026-09-04")),
-      ),
+    () => captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
 
-  // The TUI bump is filed; the root issue is left alone, not cleared.
+  // The `bun.lock` bump is filed; the first issue is left alone, not cleared.
   assert.ok(ghCall(spawn, "create"));
   assert.equal(ghCall(spawn, "edit"), undefined);
   assert.ok(
@@ -1750,11 +1667,9 @@ test("a revised bump does not clear the old issue when the probe is indeterminat
   const cwd = process.cwd();
   let log;
   try {
-    writeFileSync(join(dir, "package-lock.json"), "{ truncated…");
+    writeFileSync(join(dir, "bun.lock"), "{ truncated…");
     process.chdir(dir);
-    log = withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    );
+    log = captureLog(() => main("o/r", spawn, "2026-09-04"));
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -1785,10 +1700,8 @@ test("a revised bump that is no longer exposed clears without claiming an issue"
       },
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() =>
-      captureLog(() => main("o/r", spawn, "2026-09-04")),
-    ),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn, "2026-09-04")),
   );
   const edit = ghCall(spawn, "edit");
   assert.ok(edit);
@@ -1814,9 +1727,8 @@ test("main reads every page of open dependabot issues", () => {
       ],
     ],
   });
-  const log = inTempRepo(
-    { "package-lock.json": lockWith("fast-uri", "3.1.5") },
-    () => withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  const log = inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.equal(ghCall(spawn, "create"), undefined);
   assert.ok(log.some((l) => l.includes("#41 is up to date")));
@@ -1829,8 +1741,8 @@ test("main drops a pull request returned by the issues endpoint", () => {
     alertPages: [[alert({ ghsa: "GHSA-a" })]],
     issues: [[{ number: 9, body: "a PR body", pull_request: { url: "..." } }]],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.5") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.5") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   assert.ok(ghCall(spawn, "create"), "the issue is still filed");
 });
@@ -1844,8 +1756,8 @@ test("main files an issue naming only the advisories that apply here", () => {
       ],
     ],
   });
-  inTempRepo({ "package-lock.json": lockWith("fast-uri", "3.1.0") }, () =>
-    withoutProjectToken(() => captureLog(() => main("o/r", spawn))),
+  inTempRepo({ "bun.lock": lockWith("fast-uri", "3.1.0") }, () =>
+    captureLog(() => main("o/r", spawn)),
   );
   const create = ghCall(spawn, "create");
   const body = create.args[create.args.indexOf("--body") + 1];
@@ -1857,38 +1769,746 @@ test("main files an issue naming only the advisories that apply here", () => {
   );
 });
 
-test("main fails the run when a card is added but its fields are not set", () => {
+// ---------------------------------------------------------------------------
+// Written in this repo: the cases for what the script's header lists as
+// edits. Each names the edit it holds in place.
+// ---------------------------------------------------------------------------
+
+/** The `gh issue …` calls a run made: its writes. */
+const issueWrites = (spawn) =>
+  spawn.calls.filter((c) => c.cmd === "gh" && c.args[0] === "issue");
+
+/** An open issue for the default alert (`GHSA-a` on `fast-uri`), up to date. */
+const filedIssue = (extra = {}) => {
+  const [group] = groupAlerts([alert({ ghsa: "GHSA-a" })]);
+  return {
+    number: 41,
+    title: buildIssueTitle(group),
+    body: buildIssueBody(group, asInstalled()),
+    ...extra,
+  };
+};
+
+const VULNERABLE = { "bun.lock": lockWith("fast-uri", "3.1.5") };
+
+test("the constants name this repository's branch, lockfile, manifests and labels", () => {
+  assert.equal(TARGET_BRANCH, "main");
+  assert.equal(LOCKFILE, "bun.lock");
+  assert.deepEqual(KNOWN_MANIFESTS, ["package.json", "bun.lock"]);
+  assert.deepEqual(ISSUE_LABELS, ["factory", "chore", "dependabot"]);
+  assert.deepEqual(SWEEP_LABELS, ["chore", "dependabot"]);
+  assert.equal(
+    PLACEMENT_DOC,
+    "https://github.com/NorthwoodsSentinel/mycelia-mcp/blob/main/AGENTS.md#dependency-placement",
+  );
+});
+
+test("main refuses to run with no repository named, before any call", () => {
+  const spawn = fakeSpawn();
+  assert.throws(() => main("", spawn), /repo not specified/);
+  assert.equal(spawn.calls.length, 0);
+});
+
+// --- edits 1, 2, 7, 8 and 9: what an issue says, and how it is filed -----------
+
+test("an issue's text names this repository and none of the source's board, branch or issue numbers", () => {
+  const [group] = groupAlerts([alert({ ghsa: "GHSA-a" })]);
+  const bodies = [
+    buildIssueBody(group, asInstalled()),
+    buildIssueBody(group, {
+      declared: true,
+      affected: [
+        { path: "node_modules/fast-uri", version: "3.1.5", hoisted: true },
+        {
+          path: "node_modules/ajv/node_modules/fast-uri",
+          version: "3.0.1",
+          hoisted: false,
+        },
+      ],
+    }),
+    buildClearedBody(group, {
+      ghsas: ["GHSA-a"],
+      reason: "why",
+      today: "2026-09-04",
+    }),
+    buildNewAdvisoryComment(group, ["GHSA-a"]),
+  ];
+  for (const body of bodies) {
+    assert.doesNotMatch(body, /#\d/, "no issue number of the source's");
+    assert.doesNotMatch(body, /v2\/main/);
+    assert.doesNotMatch(body, /modelcontextprotocol/);
+    assert.doesNotMatch(body, /board|card|milestone|Priority/i);
+    assert.doesNotMatch(body, /package-lock\.json/);
+  }
+  assert.ok(bodies[0].includes(`](${PLACEMENT_DOC})`));
+  assert.match(bodies[0], /read from `bun\.lock`/);
+  assert.match(bodies[2], /No longer applicable on `main` as of 2026-09-04/);
+});
+
+test("an override is asked for at the top level, whether or not the package is declared", () => {
+  const [group] = groupAlerts([alert({ ghsa: "GHSA-a" })]);
+  const transitiveOnly = buildIssueBody(group, asInstalled());
+  assert.match(
+    transitiveOnly,
+    /Add an \[`overrides`\]\(.+\) entry\*\* in `package\.json` pinning `fast-uri` to `3\.1\.6`/,
+  );
+  assert.match(transitiveOnly, /which no declared range reaches/);
+  assert.match(transitiveOnly, /Bun ignores a nested \(parent-scoped\) entry/);
+  assert.doesNotMatch(transitiveOnly, /the declared one included/);
+  assert.doesNotMatch(transitiveOnly, /```json/, "no parent-scoped example");
+});
+
+// --- edit 4: bun.lock, through the existing reader ------------------------------
+
+test("main reads bun.lock as Bun writes it: trailing commas, nested and scoped copies", () => {
+  // The text form, not JSON: Bun leaves a comma before each closing bracket.
+  const text = `{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "fixture",
+      "dependencies": {
+        "fast-uri": "^4.0.0",
+      },
+    },
+  },
+  "packages": {
+    "@sc/a": ["@sc/a@1.0.0", "", {}, "sha512-fixture"],
+
+    "@sc/a/fast-uri": ["fast-uri@3.0.1", "", {}, "sha512-fixture"],
+
+    "ajv": ["ajv@8.0.0", "", {}, "sha512-fixture"],
+
+    "ajv/fast-uri": ["fast-uri@3.1.5", "", {}, "sha512-fixture"],
+
+    "fast-uri": ["fast-uri@4.0.0", "", {}, "sha512-fixture"],
+  }
+}
+`;
+  const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
+  inTempRepo({ "bun.lock": text }, () => captureLog(() => main("o/r", spawn)));
+
+  const create = ghCall(spawn, "create");
+  assert.ok(create, "the nested copies are in range, so an issue is filed");
+  const body = create.args[create.args.indexOf("--body") + 1];
+  // Each nested copy, under the path the source's functions expect.
+  assert.match(
+    body,
+    /\| `node_modules\/@sc\/a\/node_modules\/fast-uri` \| `3\.0\.1` \|/,
+  );
+  assert.match(
+    body,
+    /\| `node_modules\/ajv\/node_modules\/fast-uri` \| `3\.1\.5` \|/,
+  );
+  // The declared, hoisted copy is 4.0.0 and safe: only the override is asked.
+  assert.doesNotMatch(body, /\| `node_modules\/fast-uri` \|/);
+  assert.doesNotMatch(body, /Raise the declared range/);
+  assert.match(body, /Add an \[`overrides`\]/);
+  assert.match(body, /\| Vulnerable on `main` \| `3\.0\.1`, `3\.1\.5` \|/);
+});
+
+test("main asks for the declared range to be raised when bun.lock's root declares the vulnerable copy", () => {
+  const lock = lockOf({ "fast-uri": "3.1.5" });
+  lock.workspaces[""].devDependencies = { "fast-uri": "^3.0.0" };
+  const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
+  inTempRepo({ "bun.lock": lock }, () => captureLog(() => main("o/r", spawn)));
+  const create = ghCall(spawn, "create");
+  const body = create.args[create.args.indexOf("--body") + 1];
+  assert.match(body, /Raise the declared range in `package\.json`/);
+  assert.doesNotMatch(body, /overrides/);
+});
+
+for (const [name, files, reason] of [
+  ["is missing", {}, "ENOENT"],
+  [
+    "is a lockfile version the reader does not know",
+    { "bun.lock": { ...lockWith("fast-uri", "3.1.5"), lockfileVersion: 2 } },
+    "lockfileVersion 2",
+  ],
+  [
+    "has no packages map",
+    { "bun.lock": { lockfileVersion: 1, workspaces: { "": {} } } },
+    "no packages map",
+  ],
+]) {
+  test(`main neither files nor clears when bun.lock ${name}`, () => {
+    // A lockfile that cannot be read is evidence of nothing: the open issue
+    // stays exactly as it is, and nothing new is filed on a guess.
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" })]],
+      issues: [filedIssue()],
+    });
+    const log = inTempRepo(files, () =>
+      captureLog(() => main("o/r", spawn, "2026-09-04")),
+    );
+    assert.deepEqual(issueWrites(spawn), []);
+    assert.ok(
+      log.some(
+        (l) =>
+          l.includes("bun.lock could not be read or parsed") &&
+          l.includes(reason) &&
+          l.includes("WITHOUT clearing"),
+      ),
+      `expected an unreadable-lockfile line naming ${reason}, got: ${log.join(" | ")}`,
+    );
+  });
+}
+
+test("main does not judge a copy whose locked version is not a version", () => {
+  // `semver.satisfies` answers false for a git source, which would read as
+  // "out of range" and clear the issue. The package is left alone instead.
+  const lock = lockOf({ "fast-uri": "3.1.6" });
+  lock.packages["ajv"] = ["ajv@8.0.0", "", {}, "sha512-fixture"];
+  lock.packages["ajv/fast-uri"] = ["fast-uri@github:someone/fast-uri#abc1234"];
+  for (const issues of [[], [filedIssue()]]) {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" })]],
+      issues,
+    });
+    const log = inTempRepo({ "bun.lock": lock }, () =>
+      captureLog(() => main("o/r", spawn, "2026-09-04")),
+    );
+    assert.deepEqual(issueWrites(spawn), []);
+    assert.ok(
+      log.some(
+        (l) =>
+          l.includes("fast-uri has a copy in bun.lock") &&
+          l.includes("not a semver version") &&
+          l.includes("WITHOUT clearing"),
+      ),
+      `expected a not-a-version line, got: ${log.join(" | ")}`,
+    );
+  }
+});
+
+test("a package with an unversioned copy does not stop another package's issue", () => {
+  const lock = lockOf({ "fast-uri": "3.1.5", qs: "6.15.3" });
+  lock.packages["x"] = ["x@1.0.0", "", {}, "sha512-fixture"];
+  lock.packages["x/qs"] = ["qs@file:../qs"];
   const spawn = fakeSpawn({
     alertPages: [
       [
         alert({ ghsa: "GHSA-a" }),
         alert({
-          ghsa: "GHSA-b",
+          ghsa: "GHSA-q",
           pkg: "qs",
           fixed: "6.16.0",
           range: "< 6.16.0",
         }),
       ],
     ],
-    boardEditStatus: 1,
+  });
+  inTempRepo({ "bun.lock": lock }, () => captureLog(() => main("o/r", spawn)));
+  const created = ghCalls(spawn, "create");
+  assert.equal(created.length, 1);
+  assert.match(
+    created[0].args[created[0].args.indexOf("--title") + 1],
+    /`fast-uri`/,
+  );
+});
+
+// --- edit 5: the alert's manifest path is compared, never opened ----------------
+
+for (const manifest of KNOWN_MANIFESTS) {
+  test(`an alert against ${manifest} is checked against bun.lock`, () => {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a", manifest })]],
+    });
+    inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+    const create = ghCall(spawn, "create");
+    assert.ok(create);
+    assert.ok(
+      create.args[create.args.indexOf("--title") + 1].includes(
+        `in \`${manifest}\``,
+      ),
+    );
+  });
+}
+
+test("a file at the path an alert names is never read: an unknown manifest is not checked", () => {
+  // The source opened this path. Each file below is a readable lockfile that
+  // says the package is vulnerable, so a run that opened it would file an
+  // issue. None is filed, and nothing is cleared either.
+  const vulnerable = lockWith("fast-uri", "3.1.5");
+  const cases = [
+    "package-lock.json",
+    "sub/package.json",
+    "sub/bun.lock",
+    "./bun.lock",
+    "../outside/bun.lock",
+    "BUN.LOCK",
+  ];
+  for (const manifest of cases) {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a", manifest })]],
+      issues: [
+        {
+          number: 41,
+          title: "t",
+          body: buildIssueBody(
+            groupAlerts([alert({ ghsa: "GHSA-a", manifest })])[0],
+            asInstalled(),
+          ),
+        },
+      ],
+    });
+    // The checkout's own lockfile says "not exposed": a run that fell back to
+    // it for an unknown manifest would clear the issue.
+    const files = { "sub/placeholder": "" };
+    if (!manifest.startsWith("..")) files[manifest] = vulnerable;
+    files["bun.lock"] ??= lockWith("fast-uri", "3.1.6");
+    const log = inTempRepo(files, () =>
+      captureLog(() => main("o/r", spawn, "2026-09-04")),
+    );
+    assert.deepEqual(issueWrites(spawn), [], manifest);
+    assert.ok(
+      log.some(
+        (l) =>
+          l.includes(JSON.stringify(manifest)) &&
+          l.includes("not a manifest this sweep knows"),
+      ),
+      `${manifest}: expected an unknown-manifest line, got: ${log.join(" | ")}`,
+    );
+  }
+});
+
+// --- edit 6: the setting, with the job's own token ------------------------------
+
+test("no call is handed a token or an environment of its own", () => {
+  // The source passed a second token, from PROJECT_TOKEN, to the setting
+  // lookup. Even with that variable set, every call here inherits the
+  // process's environment and nothing else.
+  const saved = process.env.PROJECT_TOKEN;
+  process.env.PROJECT_TOKEN = "not-used";
+  const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
+  try {
+    inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+  } finally {
+    if (saved === undefined) delete process.env.PROJECT_TOKEN;
+    else process.env.PROJECT_TOKEN = saved;
+  }
+  assert.ok(ghCall(spawn, "create"));
+  for (const call of spawn.calls) {
+    assert.equal(call.opts?.env, undefined, call.args.join(" "));
+    assert.equal(call.args.includes("not-used"), false);
+    assert.notEqual(call.args[0], "project");
+  }
+});
+
+test("a readable setting answer that does not say enabled as true or false stops the run", () => {
+  // The source parsed an empty answer as {} and went on as "verified off".
+  for (const [stdout, message] of [
+    ["", /truncated or malformed response/],
+    ["{", /truncated or malformed response/],
+    ["null", /no true-or-false `enabled`/],
+    ["[]", /no true-or-false `enabled`/],
+    ["{}", /no true-or-false `enabled`/],
+    ['{"enabled":"false"}', /no true-or-false `enabled`/],
+    ['{"message":"Not Found"}', /no true-or-false `enabled`/],
+  ]) {
+    const spawn = fakeSpawn({
+      securityFixesResponse: { status: 0, stdout },
+      alertPages: [[alert({ ghsa: "GHSA-a" })]],
+      issues: [filedIssue()],
+    });
+    assert.throws(
+      () => inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn))),
+      message,
+      JSON.stringify(stdout),
+    );
+    assert.equal(spawn.calls.length, 1, "nothing else runs");
+  }
+});
+
+// --- edit 10, addition A1: a marker counts only on what the automation wrote ----
+
+const NOT_THE_SWEEPS = [
+  ["a person wrote it", { user: { login: "mallory", type: "User" } }],
+  [
+    "a person wrote it under the automation's name",
+    { user: { login: "github-actions[bot]", type: "User" } },
+  ],
+  ["another bot wrote it", { user: { login: "other[bot]", type: "Bot" } }],
+  [
+    "its author has no account type",
+    { user: { login: "github-actions[bot]" } },
+  ],
+  ["it has no author", { user: null }],
+  ["it lacks the chore label", { labels: [{ name: "dependabot" }] }],
+  ["it has no labels", { labels: [] }],
+];
+
+for (const [why, forged] of NOT_THE_SWEEPS) {
+  test(`an issue carrying the marker is not this sweep's when ${why}: the real one is filed`, () => {
+    // The forged issue matches the bump exactly. The source would have
+    // taken it for its own and filed nothing.
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" })]],
+      issues: [filedIssue({ number: 66, ...forged })],
+    });
+    inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+    const writes = issueWrites(spawn);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].args[1], "create");
+  });
+
+  test(`an issue carrying the marker is not this sweep's when ${why}: it is never cleared`, () => {
+    // No alert is open, so the source would have rewritten this issue to
+    // "no longer applicable". It is someone else's, and is left alone.
+    const spawn = fakeSpawn({
+      alertPages: [[]],
+      issues: [filedIssue({ number: 66, ...forged })],
+    });
+    inTempRepo(VULNERABLE, () =>
+      captureLog(() => main("o/r", spawn, "2026-09-04")),
+    );
+    assert.deepEqual(issueWrites(spawn), []);
+  });
+}
+
+test("a forged issue listed first does not hide the sweep's own", () => {
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" })]],
+    issues: [
+      filedIssue({ number: 66, user: { login: "mallory", type: "User" } }),
+      filedIssue(),
+    ],
+  });
+  const log = inTempRepo(VULNERABLE, () =>
+    captureLog(() => main("o/r", spawn)),
+  );
+  assert.deepEqual(issueWrites(spawn), []);
+  assert.ok(log.some((l) => l.includes("#41 is up to date")));
+});
+
+test("the comments are read from the REST listing, every page, and never through issue view", () => {
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" }), alert({ ghsa: "GHSA-b" })]],
+    issues: [filedIssue()],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+  const read = spawn.calls.find((c) => c.args.join(" ").includes("/comments?"));
+  assert.deepEqual(read.args, [
+    "api",
+    "--paginate",
+    "--slurp",
+    "repos/o/r/issues/41/comments?per_page=100",
+  ]);
+  assert.equal(ghCall(spawn, "view"), undefined);
+});
+
+for (const [why, user] of [
+  ["a person", { login: "mallory", type: "User" }],
+  [
+    "a person under the automation's name",
+    { login: "github-actions[bot]", type: "User" },
+  ],
+  ["another bot", { login: "other[bot]", type: "Bot" }],
+  ["nobody", null],
+]) {
+  test(`a comment marker written by ${why} does not stop an advisory being announced`, () => {
+    // The source took a marker from any commenter, so one comment could keep
+    // a new advisory from ever being announced.
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" }), alert({ ghsa: "GHSA-b" })]],
+      issues: [filedIssue()],
+      comments: [{ user, body: `${buildCommentMarker(["GHSA-b"])}\nforged` }],
+    });
+    inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+    const comment = ghCall(spawn, "comment");
+    assert.ok(comment, "the advisory is still announced");
+    assert.deepEqual(
+      parseCommentMarker(comment.args[comment.args.indexOf("--body") + 1]),
+      ["GHSA-b"],
+    );
+  });
+}
+
+// --- edit 13: what gh hands back is checked before it is acted on ---------------
+
+test("an alert entry that cannot be keyed stops the run before anything is touched", () => {
+  const nameless = alert({ ghsa: "GHSA-a" });
+  delete nameless.dependency.package.name;
+  const pathless = alert({ ghsa: "GHSA-a" });
+  pathless.dependency.manifest_path = "";
+  const unadvised = alert({ ghsa: "GHSA-a" });
+  delete unadvised.security_advisory;
+  for (const entry of [
+    null,
+    "an alert",
+    7,
+    [],
+    {},
+    nameless,
+    pathless,
+    unadvised,
+  ]) {
+    assertListingFailureTouchesNothing(
+      {
+        status: 0,
+        stdout: JSON.stringify([[alert({ ghsa: "GHSA-b" }), entry]]),
+      },
+      /held an entry that does not name its package, its manifest and its advisory/,
+    );
+  }
+});
+
+/** A run whose issue listing is `issuesResponse` must throw and write nothing. */
+function assertIssueListingStopsTheRun(issuesResponse, message) {
+  const spawn = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" })]],
+    issuesResponse,
   });
   assert.throws(
-    () =>
-      inTempRepo(
-        {
-          "package-lock.json": {
-            lockfileVersion: 3,
-            packages: {
-              "": { dependencies: {} },
-              "node_modules/fast-uri": { version: "3.1.5" },
-              "node_modules/qs": { version: "6.15.3" },
-            },
-          },
-        },
-        () => withProjectToken(() => captureLog(() => main("o/r", spawn))),
-      ),
-    /incomplete board placement/,
+    () => inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn))),
+    message,
+    JSON.stringify(issuesResponse),
   );
-  // A half-placed card is worth failing over — but not before both issues exist.
-  assert.equal(ghCalls(spawn, "create").length, 2);
+  assert.deepEqual(issueWrites(spawn), []);
+}
+
+test("an issue listing that failed, is empty, is not JSON or has no pages is never 'no issue is open'", () => {
+  // Read as "no issue of mine is open", each of these would file a duplicate.
+  assertIssueListingStopsTheRun(
+    { status: 1, stderr: "gh: HTTP 502: Bad Gateway" },
+    /failed \(1\): gh: HTTP 502/,
+  );
+  assertIssueListingStopsTheRun({ status: 0, stdout: "" }, SyntaxError);
+  assertIssueListingStopsTheRun({ status: 0, stdout: "[[{" }, SyntaxError);
+  assertIssueListingStopsTheRun({ status: 0, stdout: "[]" }, /no pages/);
+  assertIssueListingStopsTheRun({ status: 0, stdout: "null" }, /non-list/);
+  assertIssueListingStopsTheRun(
+    { status: 0, stdout: '{"message":"Not Found"}' },
+    /non-list/,
+  );
+  assertIssueListingStopsTheRun({ status: 0, stdout: "[[], {}]" }, /non-list/);
+});
+
+test("an issue listing entry that is not an object stops the run", () => {
+  for (const entry of [null, "an issue", 41, []]) {
+    assertIssueListingStopsTheRun(
+      {
+        status: 0,
+        stdout: JSON.stringify([[asSweepIssue(filedIssue()), entry]]),
+      },
+      /an entry that is not an object/,
+    );
+  }
+});
+
+test("an issue of the sweep's own with no positive integer number stops the run before any write", () => {
+  // The number is handed to `gh issue edit` and `gh issue comment` as an
+  // argument of its own, and is put into an API path.
+  for (const number of ["--help", "41", 0, -1, 1.5, null, [41]]) {
+    for (const alertPages of [[[alert({ ghsa: "GHSA-a" })]], [[]]]) {
+      const spawn = fakeSpawn({
+        alertPages,
+        issues: [filedIssue({ number })],
+      });
+      assert.throws(
+        () =>
+          inTempRepo(VULNERABLE, () =>
+            captureLog(() => main("o/r", spawn, "2026-09-04")),
+          ),
+        /an issue of this sweep's own has no positive integer number/,
+        String(number),
+      );
+      assert.deepEqual(issueWrites(spawn), []);
+    }
+  }
+});
+
+test("someone else's issue with an unusable number is dropped, not fatal", () => {
+  // Only an issue the sweep takes for its own can reach `gh` by number.
+  const spawn = fakeSpawn({
+    alertPages: [[]],
+    issues: [
+      filedIssue({
+        number: "--help",
+        user: { login: "mallory", type: "User" },
+      }),
+    ],
+  });
+  inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn)));
+  assert.deepEqual(issueWrites(spawn), []);
+});
+
+test("a comment listing that failed or is malformed stops the run with the issue untouched", () => {
+  for (const [commentsResponse, message] of [
+    [{ status: 1, stderr: "gh: HTTP 502: Bad Gateway" }, /failed \(1\)/],
+    [{ status: 0, stdout: "" }, SyntaxError],
+    [{ status: 0, stdout: "[]" }, /no pages/],
+    [{ status: 0, stdout: '{"message":"Not Found"}' }, /non-list/],
+    [{ status: 0, stdout: "[[null]]" }, /an entry that is not an object/],
+    [
+      { status: 0, stdout: '[["a comment"]]' },
+      /an entry that is not an object/,
+    ],
+  ]) {
+    const spawn = fakeSpawn({
+      alertPages: [[alert({ ghsa: "GHSA-a" }), alert({ ghsa: "GHSA-b" })]],
+      issues: [filedIssue()],
+      commentsResponse,
+    });
+    assert.throws(
+      () => inTempRepo(VULNERABLE, () => captureLog(() => main("o/r", spawn))),
+      message,
+      JSON.stringify(commentsResponse),
+    );
+    assert.deepEqual(issueWrites(spawn), []);
+  }
+});
+
+test("a write that fails stops the run, and a failed comment leaves the marker unwritten", () => {
+  const grown = {
+    alertPages: [[alert({ ghsa: "GHSA-a" }), alert({ ghsa: "GHSA-b" })]],
+    issues: [filedIssue()],
+  };
+  const run = (spawn) =>
+    inTempRepo(VULNERABLE, () =>
+      captureLog(() => main("o/r", spawn, "2026-09-04")),
+    );
+
+  const create = fakeSpawn({
+    alertPages: [[alert({ ghsa: "GHSA-a" })]],
+    createStatus: 1,
+  });
+  assert.throws(() => run(create), /gh issue create failed: write blew up/);
+
+  const comment = fakeSpawn({ ...grown, commentStatus: 1 });
+  assert.throws(() => run(comment), /gh issue comment failed: write blew up/);
+  assert.equal(ghCall(comment, "edit"), undefined, "comment first, or nothing");
+
+  const edit = fakeSpawn({ ...grown, editStatus: 1 });
+  assert.throws(() => run(edit), /gh issue edit failed: write blew up/);
+
+  const cleared = fakeSpawn({
+    alertPages: [[]],
+    issues: [filedIssue()],
+    editStatus: 1,
+  });
+  assert.throws(() => run(cleared), /gh issue edit failed: write blew up/);
+});
+
+// --- edit 11, addition A3: every issue write goes through the paced writer ------
+
+test("every create, comment and edit goes through the writer, and no read does", () => {
+  // One run that makes all three kinds of write: a comment and an edit on the
+  // issue that grew an advisory, a clearing edit on the one whose alert is
+  // gone, and a create for a new bump.
+  const [gone] = groupAlerts([
+    alert({ ghsa: "GHSA-gone", pkg: "qs", fixed: "6.16.0" }),
+  ]);
+  const spawn = fakeSpawn({
+    alertPages: [
+      [
+        alert({ ghsa: "GHSA-a" }),
+        alert({ ghsa: "GHSA-b" }),
+        alert({
+          ghsa: "GHSA-c",
+          pkg: "browserslist",
+          fixed: "4.28.7",
+          range: "<= 4.28.6",
+        }),
+      ],
+    ],
+    issues: [
+      filedIssue(),
+      {
+        number: 42,
+        title: buildIssueTitle(gone),
+        body: buildIssueBody(gone, asInstalled()),
+      },
+    ],
+  });
+  let writing = false;
+  const through = [];
+  const write = (fn) => {
+    writing = true;
+    try {
+      return fn();
+    } finally {
+      writing = false;
+    }
+  };
+  const recording = (cmd, args, opts) => {
+    through.push({ args, writing });
+    return spawn(cmd, args, opts);
+  };
+  inTempRepo(
+    { "bun.lock": lockOf({ "fast-uri": "3.1.5", browserslist: "4.28.2" }) },
+    () => captureLog(() => sweepMain("o/r", recording, "2026-09-04", write)),
+  );
+
+  const kinds = through
+    .filter((c) => c.args[0] === "issue")
+    .map((c) => c.args[1]);
+  assert.deepEqual(kinds, ["create", "comment", "edit", "edit"]);
+  for (const call of through) {
+    assert.equal(
+      call.writing,
+      call.args[0] === "issue",
+      `${call.args.slice(0, 2).join(" ")} ${call.writing ? "went" : "did not go"} through the writer`,
+    );
+  }
+});
+
+test("a run that makes several writes pauses one second before each write after the first", () => {
+  const spawn = fakeSpawn({
+    alertPages: [
+      [
+        alert({ ghsa: "GHSA-a" }),
+        alert({
+          ghsa: "GHSA-q",
+          pkg: "qs",
+          fixed: "6.16.0",
+          range: "< 6.16.0",
+        }),
+        alert({
+          ghsa: "GHSA-c",
+          pkg: "browserslist",
+          fixed: "4.28.7",
+          range: "<= 4.28.6",
+        }),
+      ],
+    ],
+  });
+  const events = [];
+  const recording = (cmd, args, opts) => {
+    if (args[0] === "issue") events.push(args[1]);
+    return spawn(cmd, args, opts);
+  };
+  inTempRepo(
+    {
+      "bun.lock": lockOf({
+        "fast-uri": "3.1.5",
+        qs: "6.15.3",
+        browserslist: "4.28.2",
+      }),
+    },
+    () =>
+      captureLog(() =>
+        sweepMain(
+          "o/r",
+          recording,
+          "2026-09-04",
+          pacedWrites((ms) => events.push(`pause ${ms}`)),
+        ),
+      ),
+  );
+  assert.deepEqual(events, [
+    "create",
+    `pause ${WRITE_PAUSE_MS}`,
+    "create",
+    `pause ${WRITE_PAUSE_MS}`,
+    "create",
+  ]);
+});
+
+test("with the default writer, a run that makes one write goes straight through", () => {
+  // The fourth parameter left out: `pacedWrites()`, whose first write does not
+  // wait. One write is made, so nothing here sleeps.
+  const spawn = fakeSpawn({ alertPages: [[alert({ ghsa: "GHSA-a" })]] });
+  inTempRepo(VULNERABLE, () => captureLog(() => sweepMain("o/r", spawn)));
+  assert.equal(issueWrites(spawn).length, 1);
 });

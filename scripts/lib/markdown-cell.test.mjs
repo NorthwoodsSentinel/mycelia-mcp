@@ -1,3 +1,11 @@
+// In this repo: copied unchanged below this note from
+// modelcontextprotocol/inspector at commit
+// 7df76f6eea9ea425891289333837878ebb31ae6a,
+// scripts/lib/markdown-cell.test.mjs (blob
+// c9b760dc99926bfde783c9d0fe0fa307681d3533). Tests for the table-cell
+// escape the daily alert sweep uses. Run via `npm run test:scripts`, which
+// names this file by path. Record: PROVENANCE.md, "Sweeps".
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { escapeTableCell } from "./markdown-cell.mjs";

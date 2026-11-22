@@ -1,4 +1,142 @@
 #!/usr/bin/env node
+// The daily alert sweep: once a day it reads this repository's open Dependabot
+// alerts and files ONE GitHub issue per bump, or edits the one it filed before.
+//
+// In this repo: the MCP Inspector's script (modelcontextprotocol/inspector at
+// commit 7df76f6eea9ea425891289333837878ebb31ae6a,
+// scripts/dependabot-alerts.mjs, blob
+// 3df0252a61d81e5cde610f0fc76cc88f656704af), by copy then edit: the unchanged
+// file is this file's first commit here. The source's header follows this
+// block unchanged, so its "#NNNN" numbers are the source repository's issues,
+// and what it says of a board, a milestone, a second token, five lockfiles and
+// a second branch describes the source, not this file. Comments further down
+// that cite "(Copilot)" or a "#NNNN" are the source's too, and the doc
+// comments of the functions kept unchanged still say `package-lock.json`:
+// here their `lock` is the shape `readLockfile` builds from `bun.lock`.
+// Record: PROVENANCE.md, "Sweeps".
+// Design: docs/DESIGN-nor-673-sweeps.md, section 2.
+//
+// What differs from the source, and why:
+//
+//   1. The board write is removed (`PROJECT_ID`, both field ids,
+//      `BOARD_STATUS`, `BOARD_PRIORITY`, `optionId`, `addToBoard`, and the
+//      end-of-run failure on a half-placed card). This repository has no
+//      project board, and the second token that write used is not passed to
+//      the job.
+//   2. The milestone lookup is removed (`currentMilestone`, `pickMilestone`,
+//      the `--milestone` argument). This repository has no milestones.
+//   3. `TARGET_BRANCH` is `main`, this repository's one branch. The source's
+//      reason for re-checking an alert (alerts computed from one branch,
+//      shipping from another) does not exist here. The re-check stays for a
+//      reason of this repository's own: GitHub's dependency graph for it is
+//      built from `package.json` (measured for the design, section 5), which
+//      holds ranges, so an alert says nothing of which version is installed.
+//      Only `bun.lock` says that.
+//   4. The lockfile is `bun.lock`, read through the existing reader,
+//      `scripts/lib/bun-lock.mjs`. `readLockfile` hands the source's functions
+//      the shape they already read: `packages[""]` is the root workspace, and
+//      `packages[<dir>]` is `{version}`, where `<dir>` is the reader's
+//      `node_modules/a/node_modules/b` form. So `lockfileEntries`,
+//      `isDirectDependency`, `narrowToApplicable` and `remediation` are the
+//      source's, unchanged. One check is added on what the lockfile holds: a
+//      copy of the alerted package whose version is not a semver version
+//      cannot be compared with a range, so that bump is left alone this run
+//      (the source's lockfile holds only versions; a `bun.lock` entry can
+//      name a git or file source).
+//   5. The alert's `manifest_path` is NEVER opened as a file. The source hands
+//      it to `readFileSync`. Here it is compared with a fixed list
+//      (`KNOWN_MANIFESTS`: `package.json` and `bun.lock`), and the one file
+//      read is this checkout's own `bun.lock`, by a constant name. A path
+//      outside the list is `indeterminate`: logged for a person, and an issue
+//      that tracks it is left exactly as it is. With that the source's
+//      "manifest is gone" case is gone too: it cleared an issue on the
+//      strength of a missing file, and here a `bun.lock` that is missing or
+//      will not parse is a failed read, never evidence.
+//   6. `checkSecurityPrsStillDisabled` makes its one call with the job's own
+//      token; the source could hand it a second one. With the job's token the
+//      setting cannot be read, so the run logs UNVERIFIED and carries on
+//      (`AGENTS.md`, "Dependency updates are issue-driven"). Added here: an
+//      answer that IS readable must be an object with a true-or-false
+//      `enabled`. The source reads an empty answer as "still off".
+//   7. An issue's labels are `factory`, `chore` and `dependabot`; the source's
+//      first label is `v2`. `factory` is this repository's process label.
+//   8. The issue text names this repository: its one branch and its
+//      `AGENTS.md`. The source's issue number is gone from it, because in an
+//      issue here `#NNNN` would point at this repository's own numbers. The
+//      note on a board Priority is gone with the board, and the cleared body
+//      no longer speaks of a board card. The declared range is always in
+//      `package.json`.
+//   9. The `overrides` advice is the top-level form only, and
+//      `scopedOverrideExample` and `overrideAncestors`, which built a
+//      parent-scoped example, are removed. Measured for this change with Bun
+//      1.3.14, the version CI pins, in scratch projects: a nested entry is
+//      ignored with the warning "Bun currently does not support nested
+//      "overrides""; a top-level entry is applied; and a top-level entry
+//      beside a direct dependency of the same name is accepted and decides
+//      the version (npm refuses that with EOVERRIDE, which is why the source
+//      reaches for the nested form).
+//  10. ADDITION A1 — a marker is trusted only on what the automation wrote
+//      (`AGENTS.md`: "the sweep trusts a marker only on something the
+//      automation wrote"). The source takes every open issue labelled
+//      `dependabot` whose body starts with its marker, and a marker in any
+//      comment. Here an issue counts only if `isSweepAuthored` accepts it
+//      (written by `github-actions[bot]`, account type `Bot`, carrying
+//      `SWEEP_LABELS`), and a comment's marker only if `isAutomationComment`
+//      accepts the comment. Comments are read from the REST endpoint, which
+//      states each author's account type, as the source's upstream watch
+//      reads them. A forged issue is neither edited nor cleared, and cannot
+//      stop the real one being filed; a forged comment cannot stop an
+//      advisory being announced.
+//  11. ADDITION A3 — every issue write (a create, an edit, a comment) goes
+//      through `pacedWrites`, which waits one second before any write after
+//      the first (`AGENTS.md`: "Pace bulk GitHub writes"). This sweep can
+//      make several writes in a run, so here the wait does fire. `main` takes
+//      the writer as its fourth parameter, so a test passes one that does not
+//      wait.
+//  12. `gh` is called through this repository's `scripts/lib/gh.mjs` (`gh`,
+//      `ghPaginatedList`); the source's private `gh` and `ghJson` are gone.
+//      Without the second token they differed from the shared pair only by
+//      lacking its stated output buffer.
+//  13. What `gh` hands back is checked before it is acted on, and a failed
+//      check throws. The alert listing: each entry must be an object that
+//      names its package, its manifest and its advisory, because an issue is
+//      cleared when its advisory is ABSENT from this listing, and an entry
+//      that cannot be keyed is an open alert the run cannot account for. The
+//      issue listing and each comment listing: no pages at all throws
+//      (`ghPaginatedList`), and so does an entry that is not an object. An
+//      issue this sweep takes for its own must have a positive integer
+//      `number`: it is the one field of the listing that reaches `gh` as an
+//      argument of its own. The setting, the alert listing and the issue
+//      listing are all read before the first write, so a failure in any of
+//      them leaves every issue as it was. A comment listing is read just
+//      before the one comment it guards; a failure there stops the run with
+//      that issue untouched, after whatever earlier bumps were written.
+//
+// Unchanged: the grouping by (package, manifest, patched version), the two
+// markers, the title, the order "comment first, then the marker", the
+// reconciliation of an issue whose alert has left the open listing, and
+// "never closes an issue, never opens a pull request". (The `concurrency`
+// block is in the workflow file, as in the source.)
+//
+// Known limits, each stated in the design note, section 5: GitHub's
+// dependency graph holds only this repository's direct dependencies, so an
+// advisory on a transitive package raises no alert and this sweep cannot see
+// it. The `manifest_path` of an alert here is inferred to be `package.json`;
+// no alert has existed to read it from. A listing is checked for its shape,
+// not against a total, which neither endpoint gives. An alert the sweep
+// cannot check (not npm, an unknown manifest, an unreadable lockfile) is
+// logged, its issue is left alone, and the run stays green. (The workflow's
+// install step reads the same `bun.lock` first and fails on one Bun cannot
+// read; a lockfile version this reader does not know also fails the gate's
+// install guard, which uses the same reader.)
+//
+// What this file can write: issues, issue edits and issue comments in the
+// repository `GITHUB_REPOSITORY` names, with the token `gh` finds in its
+// environment. It reads that repository's open Dependabot alerts, its open
+// issues labelled `dependabot` and their comments, one repository setting,
+// and this checkout's `bun.lock`.
+//
+// ---- the source's header, unchanged ----
 // Dependabot alert sweep (#2233), the alert-consuming half of #2229.
 //
 // Dependabot's SECURITY-update PRs are turned off in repo settings; its alerts
@@ -56,43 +194,58 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import semver from "semver";
+import { parseBunLock } from "./lib/bun-lock.mjs";
+import { gh, ghPaginatedList, REPO_SLUG } from "./lib/gh.mjs";
 import { escapeTableCell as cell } from "./lib/markdown-cell.mjs";
 import { isMainModule } from "./lib/main-module.mjs";
-
-/** Board #28 (v2). The project and field node ids are stable; option ids are not. */
-export const PROJECT_ID = "PVT_kwDOCt2Azc4BJVxt";
-export const STATUS_FIELD_ID = "PVTSSF_lADOCt2Azc4BJVxtzg5iI8c";
-export const PRIORITY_FIELD_ID = "PVTSSF_lADOCt2Azc4BJVxtzg5iJE4";
-/**
- * Option ids are regenerated whenever a single-select field's option list is
- * edited, so they are resolved by NAME at run time rather than hardcoded here —
- * a hardcoded id turns an unrelated board edit into a silently mis-set field.
- */
-export const BOARD_STATUS = "Todo";
-export const BOARD_PRIORITY = "High";
+import { pacedWrites } from "./lib/paced-writes.mjs";
+import { isAutomationComment, isSweepAuthored } from "./lib/sweep-author.mjs";
 
 /**
- * The branch this repo actually ships from, and whose lockfiles are probed.
+ * The branch the lockfile is read on, and the fix is written against: this
+ * repository's one branch.
  *
- * The workflow checks this branch out, so manifests are read from the working
- * tree rather than through `git show` — the same shape `dependency-refresh.mjs`
- * uses to run `npm outdated` against it. Named here only so the issue body can
- * say which branch the versions it quotes came from.
+ * The workflow checks it out, so `bun.lock` is read from the working tree.
+ * Named here only so the issue body can say which branch the versions it
+ * quotes came from.
  */
-export const TARGET_BRANCH = "v2/main";
+export const TARGET_BRANCH = "main";
 
 /**
  * The one ecosystem this sweep can act on.
  *
- * ⚠️ Dependabot alerts are NOT npm-only. This repo has a `Dockerfile` and
- * GitHub Actions workflows, and an alert against either arrives in the same
- * feed with a `manifest_path` that is not a lockfile — which the JSON parse
- * would reject, aborting the whole daily sweep before any npm group was
- * processed (Copilot). Everything downstream reads npm lockfiles, so a non-npm
- * alert is reported and skipped rather than guessed at: filing it properly
- * means knowing how to fix it, which is different work per ecosystem.
+ * ⚠️ Dependabot alerts are NOT npm-only. This repository has GitHub Actions
+ * workflows, and an alert against an action arrives in the same feed.
+ * Everything downstream reads the npm lockfile, so a non-npm alert is reported
+ * and skipped rather than guessed at: filing it properly means knowing how to
+ * fix it, which is different work per ecosystem.
  */
 export const SUPPORTED_ECOSYSTEM = "npm";
+
+/** The one file this sweep reads from the checkout, by this constant name. */
+export const LOCKFILE = "bun.lock";
+
+/**
+ * The `manifest_path` values this sweep knows. Each means "check
+ * `bun.lock`"; an alert that names any other path is not checked and not
+ * cleared (the header, edit 5). The value is compared with this list and is
+ * never used as a path.
+ */
+export const KNOWN_MANIFESTS = ["package.json", "bun.lock"];
+
+/** Where a declared range lives: this repository has one manifest. */
+const DECLARED_IN = "package.json";
+
+/** The labels each issue is filed with. */
+export const ISSUE_LABELS = ["factory", "chore", "dependabot"];
+
+/**
+ * The labels an open issue must carry, besides its author, before this sweep
+ * takes it for its own (addition A1): the same two the monthly sweep asks for
+ * (`scripts/dependency-refresh.mjs`, where the reason for leaving the process
+ * label out is given).
+ */
+export const SWEEP_LABELS = ["chore", "dependabot"];
 
 const MARKER_RE =
   /^<!-- dependabot-alerts: pkg=(.+?); manifest=(.+?); fixed=(.+?); ghsas=(.+?) -->/;
@@ -354,27 +507,6 @@ export function groupAlerts(alerts) {
 }
 
 /**
- * The milestone a new issue takes: the open one with the NEAREST due date.
- *
- * ⚠️ Selected here rather than in a `jq` expression because jq sorts `null`
- * BEFORE every string, so a `sort_by(.due_on) | .[0]` over the raw list hands
- * back an undated milestone in preference to every dated one (Copilot). An
- * undated bucket has no due date and so cannot be the nearest; it is dropped
- * rather than sorted last, and if nothing dated is open the issue is filed
- * unmilestoned and triage places it.
- *
- * @param {Array<{title: string, state?: string, due_on?: string | null}>} milestones
- * @returns {string | null}
- */
-export function pickMilestone(milestones) {
-  const dated = (milestones ?? []).filter(
-    (m) => (m.state ?? "open") === "open" && m.due_on,
-  );
-  if (dated.length === 0) return null;
-  return dated.sort((a, b) => a.due_on.localeCompare(b.due_on))[0].title;
-}
-
-/**
  * Narrow a group to the advisories that actually apply to what is installed.
  *
  * ⚠️ Grouping is by `(package, manifest, first_patched_version)`, and two
@@ -433,48 +565,8 @@ export function buildIssueTitle(group) {
   return `chore(deps): bump \`${group.package}\` to \`${group.fixedIn}\` in \`${group.manifestPath}\` (${n} ${n === 1 ? "advisory" : "advisories"})`;
 }
 
-const PLACEMENT_DOC =
-  "https://github.com/modelcontextprotocol/inspector/blob/v2/main/AGENTS.md#dependency-placement";
-
-/**
- * The packages a nested copy sits under, outermost first.
- *
- * `node_modules/ajv/node_modules/fast-uri` -> `["ajv"]`. Scope-aware, since a
- * scoped name contains a slash of its own.
- *
- * @param {string} path a lockfile `packages` key
- * @returns {string[]} empty for the hoisted copy
- */
-export function overrideAncestors(path) {
-  const segments = path.replace(/^node_modules\//, "").split("/node_modules/");
-  return segments.slice(0, -1);
-}
-
-/**
- * A concrete parent-scoped `overrides` block for the nested vulnerable copies.
- *
- * npm rejects a package-wide override that contradicts a direct dependency of
- * the same name (`EOVERRIDE`), so when the manifest declares the package the
- * nested copies must be reached through their parents instead.
- *
- * @param {Array<{path: string, hoisted: boolean}>} affected
- * @param {{package: string, fixedIn: string}} group
- * @returns {string} pretty-printed JSON
- */
-export function scopedOverrideExample(affected, group) {
-  const overrides = {};
-  for (const entry of affected) {
-    const ancestors = overrideAncestors(entry.path);
-    if (ancestors.length === 0) continue;
-    let node = overrides;
-    for (const ancestor of ancestors) {
-      node[ancestor] = node[ancestor] ?? {};
-      node = node[ancestor];
-    }
-    node[group.package] = group.fixedIn;
-  }
-  return JSON.stringify({ overrides }, null, 2);
-}
+/** Where the issue text points for the rule on pinning a transitive dependency. */
+export const PLACEMENT_DOC = `https://github.com/${REPO_SLUG}/blob/main/AGENTS.md#dependency-placement`;
 
 /**
  * What the maintainer actually has to change, derived from WHICH copies are
@@ -532,32 +624,28 @@ export function buildIssueBody(
     )
     .join("\n");
 
-  const manifestJson = group.manifestPath.replace(
-    /package-lock\.json$/,
-    "package.json",
-  );
   const { direct, transitive } = remediation(affected, declared);
   const steps = [];
   if (direct) {
     steps.push(
-      `**Raise the declared range in \`${manifestJson}\`** so \`${group.package}\` can no longer resolve below \`${group.fixedIn}\`, keeping the operator the manifest already uses — widening it to a bare \`>=\` would drop the compatibility bound with it.`,
+      `**Raise the declared range in \`${DECLARED_IN}\`** so \`${group.package}\` can no longer resolve below \`${group.fixedIn}\`, keeping the operator the manifest already uses — widening it to a bare \`>=\` would drop the compatibility bound with it.`,
     );
   }
   if (transitive) {
     steps.push(
-      direct
-        ? // ⚠️ A package-wide override cannot be used here: npm rejects an
-          // override whose spec differs from a direct dependency of the same
-          // name with EOVERRIDE, and this manifest declares one (Copilot). The
-          // nested copies have to be reached through their parents.
-          `**Add a parent-scoped [\`overrides\`](${PLACEMENT_DOC}) entry** for the nested copies below, which the declared range does not reach:\n\n\`\`\`json\n${scopedOverrideExample(affected, group)}\n\`\`\`\n\n   A package-wide \`"${group.package}": "${group.fixedIn}"\` would be rejected with \`EOVERRIDE\`, because this manifest also declares \`${group.package}\` directly and npm refuses an override that contradicts a direct dependency. **Not** \`npm audit fix\` either, which "resolves" an advisory with no upward escape by silently downgrading.`
-        : `**Add an [\`overrides\`](${PLACEMENT_DOC}) entry** pinning \`${group.package}\` to \`${group.fixedIn}\`, for the copies below, which no declared range reaches. **Not** \`npm audit fix\`, which "resolves" an advisory with no upward escape by silently downgrading.`,
+      // ⚠️ Top level only (the header, edit 9). The source reaches the nested
+      // copies through their parents when the manifest also declares the
+      // package, because npm refuses a package-wide override beside a direct
+      // dependency. The pinned Bun does the opposite on both counts: it
+      // ignores a nested entry, and it accepts a top-level one, which then
+      // decides every copy.
+      `**Add an [\`overrides\`](${PLACEMENT_DOC}) entry** in \`${DECLARED_IN}\` pinning \`${group.package}\` to \`${group.fixedIn}\`, for the copies below, which ${direct ? "the declared range does not reach" : "no declared range reaches"}. Write it at the top level of \`overrides\`: Bun ignores a nested (parent-scoped) entry, and a top-level one applies to every copy${direct ? ", the declared one included" : ""}. **Not** \`npm audit fix\`, which "resolves" an advisory with no upward escape by silently downgrading.`,
     );
   }
   const fix = [
     ...(steps.length === 2
       ? [
-          "Both edits are needed; neither alone clears every vulnerable copy.",
+          "Both edits are needed: the range, so that the manifest itself no longer admits a vulnerable version, and the `overrides` entry, for the copies the range does not reach.",
           "",
         ]
       : []),
@@ -577,7 +665,7 @@ export function buildIssueBody(
     // setting. The guard degrades to UNVERIFIED when the token cannot see it,
     // and an issue asserting what the run explicitly could not confirm is worse
     // than one that says so (Copilot).
-    `Filed automatically from ${applying} open Dependabot ${applying === 1 ? "alert" : "alerts"} (#2233). ${securityPrsOff ? "Dependabot opens no security-update PRs on this repo; the" : "The"} fix is written by hand against \`${TARGET_BRANCH}\`.`,
+    `Filed automatically from ${applying} open Dependabot ${applying === 1 ? "alert" : "alerts"}. ${securityPrsOff ? "Dependabot opens no security-update PRs on this repo; the" : "The"} fix is written by hand against \`${TARGET_BRANCH}\`.`,
     "",
     "| | |",
     "| --- | --- |",
@@ -599,9 +687,7 @@ export function buildIssueBody(
     fix,
     "",
     "> [!NOTE]",
-    `> **Priority is a standing rubric override.** A routine bump scores Medium; a security bump is filed **${BOARD_PRIORITY}** so it does not sit.`,
-    ">",
-    `> **Where each number comes from.** The GHSA, CVE, severity, vulnerable range and summary are the advisory's own, reported by Dependabot. What was verified independently against \`${TARGET_BRANCH}\` is the **installed versions, their paths, and whether each advisory's range still matches** — GitHub computes alerts from the default branch, so an alert is filed here only after that re-check.`,
+    `> **Where each number comes from.** The GHSA, CVE, severity, vulnerable range and summary are the advisory's own, reported by Dependabot. What was verified independently against \`${TARGET_BRANCH}\` is the **installed versions, their paths, and whether each advisory's range still matches**, read from \`${LOCKFILE}\` — the alert itself says nothing of which version is installed, so an issue is filed here only after that re-check.`,
   ].join("\n");
 }
 
@@ -611,8 +697,8 @@ export function buildIssueBody(
  * The marker is retained, so the sweep still recognises this issue and will not
  * file a fresh one if the same advisory comes back into range. The issue is NOT
  * closed automatically: whether the exposure went away because a PR fixed it or
- * because the dependency was dropped decides whether the board card is moved to
- * Done or deleted, and that is a judgement the sweep cannot make.
+ * because the dependency was dropped decides whether the issue is closed as
+ * done or as not planned, and that is a judgement the sweep cannot make.
  *
  * @param {ReturnType<typeof groupAlerts>[number]} group
  * @param {{ghsas: string[], reason: string, today: string}} context
@@ -644,7 +730,7 @@ export function buildClearedBody(group, { ghsas, reason, today }) {
     buildMarker({ ...group, ghsas }),
     `**No longer applicable on \`${TARGET_BRANCH}\` as of ${today}** — ${reason}.`,
     "",
-    `Nothing here needs bumping any more: \`${group.package}\` is no longer exposed to ${ghsas.length === 1 ? "the advisory" : "the advisories"} below on the branch we ship from. This body is rewritten in place rather than the issue being closed, because whether the card belongs in **Done** or should be **deleted** depends on why the exposure went away — a merged fix shipped something, a dropped dependency did not.`,
+    `Nothing here needs bumping any more: \`${group.package}\` is no longer exposed to ${ghsas.length === 1 ? "the advisory" : "the advisories"} below on \`${TARGET_BRANCH}\`. This body is rewritten in place rather than the issue being closed, because whether it is closed as **done** or as **not planned** depends on why the exposure went away — a merged fix shipped something, a dropped dependency did not — and that is a person's call.`,
     "",
     `Previously covered: ${ghsas.map((g) => `\`${g}\``).join(", ")}.`,
     "",
@@ -695,23 +781,9 @@ export function buildNewAdvisoryComment(group, added) {
 // Impure half: everything below shells out to `gh`. Each takes its spawn
 // function as a parameter, defaulted to `spawnSync`, so `main()` is testable
 // with an injected fake rather than left to `workflow_dispatch` — the same
-// shape `dependency-refresh.mjs` uses.
+// shape `dependency-refresh.mjs` uses. In this repo `gh` itself is
+// `lib/gh.mjs`'s (the header, edit 12).
 // ---------------------------------------------------------------------------
-
-function gh(spawn, args, { token } = {}) {
-  const env = token ? { ...process.env, GH_TOKEN: token } : process.env;
-  const result = spawn("gh", args, { encoding: "utf8", env });
-  if (result.error) throw result.error;
-  return result;
-}
-
-function ghJson(spawn, args) {
-  const result = gh(spawn, args);
-  if (result.status !== 0) {
-    throw new Error(`gh ${args[0]} failed: ${(result.stderr ?? "").trim()}`);
-  }
-  return JSON.parse(result.stdout || "null");
-}
 
 /**
  * Is this failed lookup the "this token may not read that" answer, rather than
@@ -759,20 +831,21 @@ export function isRateLimited(stderr) {
  * standing in for a required status check plus a ruleset change.
  *
  * ⚠️ **The endpoint needs `administration: read`, which `GITHUB_TOKEN` cannot
- * be granted** — `permissions:` has no such key. So with the default token the
+ * be granted** — `permissions:` has no such key. So with the job's token the
  * call 403s, and treating that as failure would make every scheduled run red
  * for a reason unrelated to the alerts. An authorization-shaped failure is
  * therefore reported and skipped; every other failure throws, and an explicit
- * `enabled: true` throws. Give `PROJECT_TOKEN` the extra `administration: read`
- * scope and the guard becomes a real assertion; without it the sweep still does
- * its job, it just cannot see that setting.
+ * `enabled: true` throws. In this repo the job's token is the only one there
+ * is (the header, edit 6), so UNVERIFIED is the expected answer here.
+ *
+ * Added in this repo: an answer that did come back must say `enabled` as true
+ * or false. The source parses an empty answer as `{}` and returns "verified",
+ * which is a claim the issue body then repeats.
  *
  * @returns {boolean} whether the setting was actually read
  */
 function checkSecurityPrsStillDisabled(repo, spawn) {
-  const result = gh(spawn, ["api", `repos/${repo}/automated-security-fixes`], {
-    token: process.env.PROJECT_TOKEN,
-  });
+  const result = gh(spawn, ["api", `repos/${repo}/automated-security-fixes`]);
   if (result.status !== 0) {
     const stderr = (result.stderr ?? "").trim();
     if (!isPermissionDenied(stderr)) {
@@ -785,12 +858,29 @@ function checkSecurityPrsStillDisabled(repo, spawn) {
     );
     return false;
   }
-  const state = JSON.parse(result.stdout || "{}");
+  let state;
+  try {
+    state = JSON.parse(result.stdout ?? "");
+  } catch (error) {
+    throw new Error(
+      `automated-security-fixes lookup returned a truncated or malformed response (${error.message})`,
+    );
+  }
+  if (
+    state === null ||
+    typeof state !== "object" ||
+    Array.isArray(state) ||
+    typeof state.enabled !== "boolean"
+  ) {
+    throw new Error(
+      "automated-security-fixes lookup returned an answer with no true-or-false `enabled`",
+    );
+  }
   if (state.enabled === true) {
     throw new Error(
       "Dependabot security-update PRs are ENABLED again. This sweep exists to replace them; " +
         "an enabled setting means both flows are running and Dependabot is opening PRs with no " +
-        "issue and no board card. Disable it (Settings -> Code security, or " +
+        "issue and no ticket. Disable it (the repository's Dependabot security updates setting, or " +
         `DELETE /repos/${repo}/automated-security-fixes) and re-run.`,
     );
   }
@@ -810,7 +900,7 @@ function checkSecurityPrsStillDisabled(repo, spawn) {
  * `main()` clears any tracked issue whose alert has vanished from this feed, so
  * an empty or partial list — a rate limit, a pagination cut off mid-stream, an
  * empty body — would stand down issues for alerts that are still open. The
- * call runs before anything is written, so throwing leaves every issue and card
+ * call runs before anything is written, so throwing leaves every issue
  * exactly as it was, and the next scheduled run is the retry.
  */
 function openAlerts(repo, spawn) {
@@ -855,65 +945,132 @@ function openAlerts(repo, spawn) {
       `dependabot-alerts: the alert listing was not a list of pages — ${untouched}`,
     );
   }
-  return pages.flat();
+  // Added in this repo (the header, edit 13). An issue is cleared when its
+  // advisory is ABSENT from this listing, so every entry has to be one the run
+  // can key: an entry that is not an object, or that does not name its
+  // package, its manifest and its advisory, is an open alert the run cannot
+  // account for, and the source's grouping would drop it without a word.
+  const alerts = pages.flat();
+  const named = (value) => typeof value === "string" && value !== "";
+  for (const alert of alerts) {
+    if (
+      alert === null ||
+      typeof alert !== "object" ||
+      Array.isArray(alert) ||
+      !named(alert.dependency?.package?.name) ||
+      !named(alert.dependency?.manifest_path) ||
+      !named(alert.security_advisory?.ghsa_id)
+    ) {
+      throw new Error(
+        `dependabot-alerts: the alert listing held an entry that does not name its package, its manifest and its advisory — ${untouched}`,
+      );
+    }
+  }
+  return alerts;
 }
 
 /**
- * A manifest's contents in the checkout, or `null` when it is absent — an alert
- * against a manifest this branch does not have is not actionable.
- */
-/**
- * Read a manifest, distinguishing the two ways it can fail to produce a lock.
+ * This checkout's `bun.lock`, in the shape the source's lockfile functions
+ * read, or the reason it could not be read.
  *
- * ⚠️ These must NOT collapse into one `null` (Copilot). "Absent" means the
- * manifest is genuinely gone from the branch, which is real evidence that the
- * exposure went away and is grounds for clearing the issue. "Unparseable" is
- * evidence of nothing at all — a malformed or truncated lockfile, or a
- * non-npm manifest — and clearing on it would stand down a live alert on the
- * strength of a read error.
+ * In this repo (the header, edits 4 and 5): the source reads whatever path the
+ * alert names. This reads ONE file, by a constant name, through the reader the
+ * install guard already uses, and builds what `lockfileEntries` and
+ * `isDirectDependency` expect of an npm lockfile: `packages[""]` is the root
+ * workspace, and `packages["node_modules/a/node_modules/b"]` is `{version}`.
  *
- * @returns {{lock: object} | {absent: true} | {unparseable: true}}
+ * ⚠️ Every failure is `unreadable`, and none is evidence. A file that is
+ * missing, will not parse, or is a lockfile version the reader does not know
+ * says nothing about whether a package is still exposed, so the caller leaves
+ * the issue alone. (The source clears an issue when the alert's manifest is
+ * gone from the branch; this repository's own lockfile being gone is a broken
+ * checkout, not a fixed alert.)
+ *
+ * `unversioned` names every package with a copy whose locked version is not a
+ * semver version: a git, file or workspace source. Such a copy cannot be
+ * compared with an advisory's range. `semver.satisfies` answers false for
+ * it, which would read as "out of range", so those copies are kept out of
+ * `packages` and the caller treats the package as not probed.
+ *
+ * @returns {{lock: {packages: Record<string, object>}, unversioned: Set<string>} | {unreadable: string}}
  */
-function readManifest(manifestPath) {
-  let raw;
+function readLockfile() {
   try {
-    raw = readFileSync(manifestPath, "utf8");
+    const { root, entries } = parseBunLock(readFileSync(LOCKFILE, "utf8"));
+    const packages = { "": root };
+    const unversioned = new Set();
+    for (const entry of entries) {
+      if (semver.valid(entry.version) === null) {
+        unversioned.add(entry.name);
+        continue;
+      }
+      packages[entry.dir] = { version: entry.version };
+    }
+    return { lock: { packages }, unversioned };
   } catch (error) {
-    if (error.code === "ENOENT") return { absent: true };
-    throw error;
-  }
-  try {
-    return { lock: JSON.parse(raw) };
-  } catch {
-    // One unreadable manifest must not abort the sweep either.
-    return { unparseable: true };
+    return { unreadable: String(error?.code ?? error?.message ?? error) };
   }
 }
 
+/** Is this entry of a listing an object, as every issue and comment is? */
+const isRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
 /**
- * Every open `dependabot`-labeled issue.
+ * Every open `dependabot`-labeled issue that THIS automation filed.
  *
  * Paginated rather than capped: the marker lookup is what makes this sweep
  * idempotent, so a truncated list files a duplicate for every issue it could
  * not see — at exactly the scale the `--slurp`ed alert fetch is built to handle
  * (Copilot). `/issues` also returns pull requests, which carry no marker and
  * are dropped.
+ *
+ * In this repo (the header, edits 10 and 13): the source keeps every issue the
+ * listing returns. A marker is not evidence in a public repository, so an
+ * issue is kept only when `isSweepAuthored` accepts it: written by
+ * `github-actions[bot]`, account type `Bot`, and carrying `SWEEP_LABELS`.
+ * Anyone else's issue is dropped here, before its body is ever parsed for a
+ * marker, so it can be neither edited nor cleared, and cannot stand in for
+ * the issue a bump still needs.
+ *
+ * The listing goes through `ghPaginatedList`, which throws on a failed call,
+ * on an answer that is not a list of pages and on no pages at all. Two checks
+ * are made here, and both throw: an entry that is not an object (skipped as
+ * "not mine", it would let a malformed answer stand for "no issue of mine is
+ * open", and a duplicate would be filed), and an own issue whose `number` is
+ * not a positive integer (that field is handed to `gh issue edit` and
+ * `gh issue comment` as an argument of its own, and is put into an API path,
+ * so nothing `gh` could read as an option, and nothing but a number, may get
+ * there).
+ *
+ * @returns {Array<{number: number, title: unknown, body: unknown}>}
+ * @throws on a failed or malformed listing, and on an own issue with no usable number
  */
 function openDependabotIssues(repo, spawn) {
-  const pages = ghJson(spawn, [
-    "api",
-    "--paginate",
-    "--slurp",
-    `repos/${repo}/issues?state=open&labels=dependabot&per_page=100`,
-  ]);
-  return (pages ?? [])
-    .flat()
-    .filter((issue) => !issue.pull_request)
-    .map((issue) => ({
-      number: issue.number,
-      title: issue.title,
-      body: issue.body,
-    }));
+  const path = `repos/${repo}/issues?state=open&labels=dependabot&per_page=100`;
+  const issues = ghPaginatedList(spawn, path);
+  for (const issue of issues) {
+    if (!isRecord(issue)) {
+      throw new Error(
+        `unexpected response from ${path}: an entry that is not an object`,
+      );
+    }
+  }
+  const own = issues.filter(
+    (issue) => !issue.pull_request && isSweepAuthored(issue, SWEEP_LABELS),
+  );
+  for (const issue of own) {
+    if (!(Number.isSafeInteger(issue.number) && issue.number > 0)) {
+      throw new Error(
+        `unexpected response from ${path}: an issue of this sweep's own has no positive integer number`,
+      );
+    }
+  }
+  return own.map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    body: issue.body,
+  }));
 }
 
 /**
@@ -924,19 +1081,30 @@ function openDependabotIssues(repo, spawn) {
  * the marker leaves the next run computing `[B, C]`, which matches no existing
  * comment, and `B` is announced a second time (Copilot). Individual GHSAs are
  * what a comment actually claims to have announced.
+ *
+ * In this repo (the header, edit 10): a comment's marker counts only when the
+ * automation wrote the comment. The source reads `gh issue view --json
+ * comments` and takes a marker from any commenter, so anyone could write
+ * "already announced" under an issue and an advisory would never be
+ * announced. The comments are read from the REST endpoint instead, every
+ * page, because it states each author's account type; that is how the
+ * source's own upstream watch reads comments before `isAutomationComment`.
+ * An entry that is not an object throws.
  */
 function announcedAdvisories(repo, number, spawn) {
-  const issue = ghJson(spawn, [
-    "issue",
-    "view",
-    String(number),
-    "--repo",
-    repo,
-    "--json",
-    "comments",
-  ]);
+  const path = `repos/${repo}/issues/${number}/comments?per_page=100`;
   const announced = new Set();
-  for (const comment of issue?.comments ?? []) {
+  for (const comment of ghPaginatedList(spawn, path)) {
+    if (!isRecord(comment)) {
+      throw new Error(
+        `unexpected response from ${path}: an entry that is not an object`,
+      );
+    }
+    const written = {
+      author: comment.user?.login,
+      isBot: comment.user?.type === "Bot",
+    };
+    if (!isAutomationComment(written)) continue;
     for (const ghsa of parseCommentMarker(comment.body) ?? []) {
       announced.add(ghsa);
     }
@@ -944,145 +1112,12 @@ function announcedAdvisories(repo, number, spawn) {
   return announced;
 }
 
-function currentMilestone(repo, spawn) {
-  const result = gh(spawn, ["api", `repos/${repo}/milestones?state=open`]);
-  if (result.status !== 0) {
-    throw new Error(`milestone lookup failed: ${(result.stderr ?? "").trim()}`);
-  }
-  return pickMilestone(JSON.parse(result.stdout || "[]"));
-}
-
 /**
- * Resolve a single-select option id by NAME.
- *
- * Option ids are regenerated whenever the field's option list is edited, so
- * looking them up each run is what keeps an unrelated board edit from turning
- * into a silently mis-set field here.
+ * File one issue, through the paced writer. In this repo it takes no
+ * milestone and returns nothing: there is no board to place the issue on
+ * afterwards (the header, edits 1 and 2).
  */
-function optionId(fieldName, optionName, token, spawn) {
-  const result = gh(
-    spawn,
-    [
-      "project",
-      "field-list",
-      "28",
-      "--owner",
-      "modelcontextprotocol",
-      "--format",
-      "json",
-    ],
-    { token },
-  );
-  if (result.status !== 0) {
-    throw new Error(`field-list failed: ${(result.stderr ?? "").trim()}`);
-  }
-  const field = JSON.parse(result.stdout).fields.find(
-    (f) => f.name === fieldName,
-  );
-  const option = field?.options?.find((o) => o.name === optionName);
-  if (!option) {
-    throw new Error(
-      `no ${fieldName} option named "${optionName}" on board #28`,
-    );
-  }
-  return option.id;
-}
-
-/**
- * Put the issue on board #28 at Todo / High.
- *
- * Failing to add the card at all is benign — the issue is already labeled and
- * milestoned, which is enough for the next `/issue-triage` sweep to board it
- * (its documented exception moves an unboarded-but-milestoned issue straight
- * into Todo). That is why an org-project PAT is an optimization here rather
- * than a prerequisite.
- *
- * ⚠️ **Failing PART WAY through is not benign**, and the two cases must not be
- * reported the same way (Copilot). Once `item-add` succeeds the issue IS
- * boarded, so no later triage sweep will look at it — a failed field edit
- * leaves a card sitting on the board with no Status or no Priority, in exactly
- * the state nothing else will fix. So a partial placement is returned to the
- * caller, which finishes every remaining group and then fails the run.
- *
- * Todo rather than Incoming: arriving through this pipeline IS the approval.
- *
- * @returns {string | null} a description of a PARTIAL placement, else `null`
- */
-function addToBoard(issueUrl, spawn) {
-  const token = process.env.PROJECT_TOKEN;
-  if (!token) {
-    console.log(
-      "dependabot-alerts: PROJECT_TOKEN unset — issue left unboarded for the next triage sweep",
-    );
-    return null;
-  }
-
-  let itemId;
-  try {
-    const added = gh(
-      spawn,
-      [
-        "project",
-        "item-add",
-        "28",
-        "--owner",
-        "modelcontextprotocol",
-        "--url",
-        issueUrl,
-        "--format",
-        "json",
-      ],
-      { token },
-    );
-    if (added.status !== 0) throw new Error((added.stderr ?? "").trim());
-    itemId = JSON.parse(added.stdout).id;
-  } catch (error) {
-    // Nothing was added, so the issue is simply unboarded — recoverable.
-    console.log(
-      `dependabot-alerts: board add failed (${error.message}) — issue is labeled and milestoned, next triage sweep will board it`,
-    );
-    return null;
-  }
-
-  // Each item-edit sets exactly one field, so Status and Priority are two calls.
-  for (const [fieldId, fieldName, optionName] of [
-    [STATUS_FIELD_ID, "Status", BOARD_STATUS],
-    [PRIORITY_FIELD_ID, "Priority", BOARD_PRIORITY],
-  ]) {
-    try {
-      const edit = gh(
-        spawn,
-        [
-          "project",
-          "item-edit",
-          "--project-id",
-          PROJECT_ID,
-          "--id",
-          itemId,
-          "--field-id",
-          fieldId,
-          "--single-select-option-id",
-          optionId(fieldName, optionName, token, spawn),
-        ],
-        { token },
-      );
-      if (edit.status !== 0) throw new Error((edit.stderr ?? "").trim());
-    } catch (error) {
-      return `${issueUrl} is on board #28 but its ${fieldName} was not set (${error.message}) — no triage sweep will fix this, set it by hand`;
-    }
-  }
-
-  console.log(
-    `dependabot-alerts: boarded ${issueUrl} at ${BOARD_STATUS}/${BOARD_PRIORITY}`,
-  );
-  return null;
-}
-
-/**
- * @returns {{url: string, milestone: string | null}}
- */
-function createIssue(repo, group, body, spawn) {
-  const milestone = currentMilestone(repo, spawn);
+function createIssue(repo, group, body, spawn, write) {
   const args = [
     "issue",
     "create",
@@ -1090,29 +1125,30 @@ function createIssue(repo, group, body, spawn) {
     repo,
     "--title",
     buildIssueTitle(group),
-    "--label",
-    "v2",
-    "--label",
-    "chore",
-    "--label",
-    "dependabot",
+    ...ISSUE_LABELS.flatMap((label) => ["--label", label]),
     "--body",
     body,
   ];
-  if (milestone) args.push("--milestone", milestone);
-  const result = gh(spawn, args);
+  const result = write(() => gh(spawn, args));
   if (result.status !== 0) {
     throw new Error(`gh issue create failed: ${(result.stderr ?? "").trim()}`);
   }
-  const url = result.stdout.trim();
-  console.log(`dependabot-alerts: filed ${url}`);
-  return { url, milestone };
+  console.log(`dependabot-alerts: filed ${(result.stdout ?? "").trim()}`);
 }
 
+/**
+ * @param {string} [repo] `owner/name`; defaults to `GITHUB_REPOSITORY`
+ * @param {typeof spawnSync} [spawn] every `gh` call goes through it
+ * @param {string} [today] the date a newly cleared body records
+ * @param {<T>(write: () => T) => T} [write] what every issue write goes
+ *   through (addition A3); defaults to `pacedWrites()`, which waits a real
+ *   second before any write after the first (`lib/paced-writes.mjs`)
+ */
 export function main(
   repo = process.env.GITHUB_REPOSITORY,
   spawn = spawnSync,
   today = new Date().toISOString().slice(0, 10),
+  write = pacedWrites(),
 ) {
   if (!repo) throw new Error("repo not specified (GITHUB_REPOSITORY unset)");
 
@@ -1125,15 +1161,15 @@ export function main(
   // `openAlerts` asks for `state=open`, so an alert that is FIXED or DISMISSED
   // simply vanishes from the feed — its group is never built, the loop never
   // visits it, and the issue it produced would keep asserting a vulnerability
-  // with a live Todo/High card forever (Copilot). The disappearance is the
-  // signal, so it has to be read from the issues rather than from the alerts.
+  // forever (Copilot). The disappearance is the signal, so it has to be read
+  // from the issues rather than from the alerts.
   const existingIssues = openDependabotIssues(repo, spawn).map((issue) => ({
     ...issue,
     marker: parseMarker(issue.body),
   }));
 
-  const manifests = new Map();
-  const boardProblems = [];
+  /** Read at most once, and only when an alert needs it. */
+  let lockfile;
 
   /**
    * Rewrite an issue to its cleared state, at most once.
@@ -1153,15 +1189,17 @@ export function main(
       return;
     }
     const body = buildClearedBody(group, { ghsas, reason, today });
-    const edit = gh(spawn, [
-      "issue",
-      "edit",
-      String(issue.number),
-      "--repo",
-      repo,
-      "--body",
-      body,
-    ]);
+    const edit = write(() =>
+      gh(spawn, [
+        "issue",
+        "edit",
+        String(issue.number),
+        "--repo",
+        repo,
+        "--body",
+        body,
+      ]),
+    );
     if (edit.status !== 0) {
       throw new Error(`gh issue edit failed: ${(edit.stderr ?? "").trim()}`);
     }
@@ -1237,11 +1275,11 @@ export function main(
     }
 
     // ⚠️ Resolved BEFORE the skips below, not after. An issue filed yesterday
-    // is still open today, and if the manifest has since gone or every copy has
-    // moved out of range, skipping straight past it leaves its body asserting a
-    // vulnerability that no longer exists and its Todo/High card live forever
-    // (Copilot). Matched on the full grouping key, `fixedIn` included: a second
-    // bump of the same package is a different issue, not an update to this one.
+    // is still open today, and if every copy has since moved out of range,
+    // skipping straight past it leaves its body asserting a vulnerability that
+    // no longer exists (Copilot). Matched on the full grouping key, `fixedIn`
+    // included: a second bump of the same package is a different issue, not an
+    // update to this one.
     const existing = existingIssues.find(
       (i) =>
         i.marker?.package === rawGroup.package &&
@@ -1255,28 +1293,35 @@ export function main(
       writeCleared(existing, rawGroup, reason);
     };
 
-    if (!manifests.has(rawGroup.manifestPath)) {
-      manifests.set(rawGroup.manifestPath, readManifest(rawGroup.manifestPath));
-    }
-    const manifest = manifests.get(rawGroup.manifestPath);
-    if (manifest.unparseable) {
-      // Deliberately does NOT clear: a read error is not evidence that the
-      // exposure went away, and treating it as such stands down a live alert.
+    // In this repo (the header, edit 5): the alert's manifest path is compared
+    // with a fixed list and is never opened. A path outside the list cannot be
+    // checked, which is evidence of nothing, so the issue is left alone.
+    if (!KNOWN_MANIFESTS.includes(rawGroup.manifestPath)) {
       console.log(
-        `dependabot-alerts: ${rawGroup.manifestPath} could not be parsed as an npm lockfile — skipping ${rawGroup.package} WITHOUT clearing its issue`,
+        `dependabot-alerts: ${rawGroup.package} is reported against ${JSON.stringify(rawGroup.manifestPath)}, which is not a manifest this sweep knows (${KNOWN_MANIFESTS.join(", ")}) — it cannot check it and will not clear its issue, raise it by hand: ${rawGroup.ghsas.join(", ")}`,
       );
       note(rawGroup, rawGroup.ghsas, "indeterminate");
       continue;
     }
-    if (manifest.absent) {
+
+    lockfile ??= readLockfile();
+    if (lockfile.unreadable !== undefined) {
+      // Deliberately does NOT clear: a read error is not evidence that the
+      // exposure went away, and treating it as such stands down a live alert.
       console.log(
-        `dependabot-alerts: ${rawGroup.manifestPath} absent on ${TARGET_BRANCH} — skipping ${rawGroup.package}`,
+        `dependabot-alerts: ${LOCKFILE} could not be read or parsed (${lockfile.unreadable}) — skipping ${rawGroup.package} WITHOUT clearing its issue`,
       );
-      note(rawGroup, rawGroup.ghsas, "not-exposed");
-      clear(`\`${rawGroup.manifestPath}\` is no longer part of this repo`);
+      note(rawGroup, rawGroup.ghsas, "indeterminate");
       continue;
     }
-    const { lock } = manifest;
+    if (lockfile.unversioned.has(rawGroup.package)) {
+      console.log(
+        `dependabot-alerts: ${rawGroup.package} has a copy in ${LOCKFILE} whose version is not a semver version, so it cannot be compared with a range — skipping it WITHOUT clearing its issue`,
+      );
+      note(rawGroup, rawGroup.ghsas, "indeterminate");
+      continue;
+    }
+    const { lock } = lockfile;
 
     const entries = lockfileEntries(lock, rawGroup.package);
     const applicable = narrowToApplicable(rawGroup, entries);
@@ -1308,24 +1353,13 @@ export function main(
     const declared = isDirectDependency(lock, group.package);
 
     if (!existing) {
-      const { url, milestone } = createIssue(
+      createIssue(
         repo,
         group,
         buildIssueBody(group, { affected, declared, securityPrsOff }),
         spawn,
+        write,
       );
-      // `Incoming` <=> no milestone, everything past it <=> milestoned. With no
-      // open milestone to assign there is nothing to put the card past Incoming
-      // WITH, so boarding it at Todo would assert an approval the invariant
-      // reads off the milestone (Copilot). Leave it for triage instead.
-      if (!milestone) {
-        console.log(
-          "dependabot-alerts: no open milestone — issue filed unmilestoned and unboarded, next triage sweep places it",
-        );
-        continue;
-      }
-      const problem = addToBoard(url, spawn);
-      if (problem) boardProblems.push(problem);
       continue;
     }
 
@@ -1363,15 +1397,17 @@ export function main(
     const announced = announcedAdvisories(repo, existing.number, spawn);
     const unannounced = added.filter((ghsa) => !announced.has(ghsa));
     if (unannounced.length > 0) {
-      const comment = gh(spawn, [
-        "issue",
-        "comment",
-        String(existing.number),
-        "--repo",
-        repo,
-        "--body",
-        buildNewAdvisoryComment(group, unannounced),
-      ]);
+      const comment = write(() =>
+        gh(spawn, [
+          "issue",
+          "comment",
+          String(existing.number),
+          "--repo",
+          repo,
+          "--body",
+          buildNewAdvisoryComment(group, unannounced),
+        ]),
+      );
       if (comment.status !== 0) {
         throw new Error(
           `gh issue comment failed: ${(comment.stderr ?? "").trim()}`,
@@ -1379,17 +1415,19 @@ export function main(
       }
     }
 
-    const edit = gh(spawn, [
-      "issue",
-      "edit",
-      String(existing.number),
-      "--repo",
-      repo,
-      "--title",
-      title,
-      "--body",
-      body,
-    ]);
+    const edit = write(() =>
+      gh(spawn, [
+        "issue",
+        "edit",
+        String(existing.number),
+        "--repo",
+        repo,
+        "--title",
+        title,
+        "--body",
+        body,
+      ]),
+    );
     if (edit.status !== 0) {
       throw new Error(`gh issue edit failed: ${(edit.stderr ?? "").trim()}`);
     }
@@ -1425,7 +1463,8 @@ export function main(
     // ⚠️ Clearing needs positive evidence about every advisory still open here.
     // Two things deny it, and both mean "leave the issue alone" (Copilot):
     // an advisory this run could not probe (`indeterminate` — a non-npm
-    // manifest, or one that would not parse), and one no group carried at all
+    // alert, a manifest this sweep does not know, or a lockfile that could
+    // not be read), and one no group carried at all
     // (absent — `groupAlerts` drops an alert with no `first_patched_version`,
     // so there is nothing to bump to and no replacement issue).
     const unresolved = stillOpen.filter((g) => {
@@ -1462,14 +1501,6 @@ export function main(
 
   if (groups.length === 0) {
     console.log("dependabot-alerts: no open alerts");
-  }
-
-  // Every group is processed before this throws: a half-placed card is worth
-  // failing the run over, but not at the cost of the issues still unfiled.
-  if (boardProblems.length > 0) {
-    throw new Error(
-      `dependabot-alerts: incomplete board placement —\n  ${boardProblems.join("\n  ")}`,
-    );
   }
 }
 

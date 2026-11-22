@@ -26,8 +26,9 @@
 // reaches the network. The three pr-flow helpers (`gate-run`, `handoff-check`,
 // `audit-verdict`) are each run into their own refusal of a bad argument, which
 // starts no other program. The monthly dependency sweep
-// (`dependency-refresh`) is run with `GITHUB_REPOSITORY` empty, which it
-// refuses before it starts `npm` or `gh`. Run via `npm run test:scripts`.
+// (`dependency-refresh`) and the daily alert sweep (`dependabot-alerts`) are
+// each run with `GITHUB_REPOSITORY` empty, which each refuses before it starts
+// `npm` or `gh`. Run via `npm run test:scripts`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -181,6 +182,21 @@ const GUARDS = [
   // named it throws on its first line, before any `npm` or `gh` is started.
   {
     script: "dependency-refresh.mjs",
+    args: [],
+    env: { GITHUB_REPOSITORY: "" },
+    terminal: [
+      {
+        status: 1,
+        line: /^Error: repo not specified \(GITHUB_REPOSITORY unset\)$/m,
+      },
+    ],
+  },
+  // The daily alert sweep, for the same reason: a run that is never "main"
+  // would be a green security sweep that read no alert. It imports `semver`,
+  // so this row also shows the script loads from a symlinked checkout. With no
+  // repository named it throws on its first line, before any `gh` is started.
+  {
+    script: "dependabot-alerts.mjs",
     args: [],
     env: { GITHUB_REPOSITORY: "" },
     terminal: [
