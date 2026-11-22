@@ -93,7 +93,7 @@ CI's job has a 10-minute `timeout-minutes`, stated in `main.yml` as a hung-job g
 
 ## Not in any gate
 
-**`skills:eval`** (`scripts/skill-eval.mjs`) runs the skills' committed trigger cases against a real model. It spends metered model calls, its result is a hit rate and not a verdict, and that spending is the owner's to approve, so it is run by hand, never from `validate`, `local:gate` or CI. `verify:skills` fails if a script any of those reach names it (`AGENTS.md`, "Maintaining the skills", rule 3).
+**`skills:eval`** (`scripts/skill-eval.mjs`) runs the skills' committed trigger cases against a real model. It spends metered model calls, its result is a hit rate and not a verdict, and the owner approved that spending as standing on 2026-11-22 (`AGENTS.md`, "Maintaining the skills"), but it is still metered, so it is run by hand, never from `validate`, `local:gate` or CI. `verify:skills` fails if a script any of those reach names it (`AGENTS.md`, "Maintaining the skills", rule 3).
 
 **The three `pr-flow` helpers** are run by an agent at a step of that skill, not by a gate. Their tests are in `test:scripts`.
 
