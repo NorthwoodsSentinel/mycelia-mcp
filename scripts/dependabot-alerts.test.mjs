@@ -3740,3 +3740,68 @@ test("lock file check: its range normaliser and the sweep's give the same answer
     assert.equal(semverRange(range), toSemverRange(range), range);
   }
 });
+
+test("lock file check: two ranges of one advisory with one patched version are one issue that names the advisory once", () => {
+  // The pull request's audit, round 1. A hoisted copy in one range and a
+  // nested copy in another, both patched by the same version: one bump.
+  const lock = {
+    lockfileVersion: 1,
+    workspaces: { "": { name: "fixture", dependencies: {} } },
+    packages: {
+      ajv: ["ajv@8.17.1", "", {}, "sha512-fixture"],
+      "fast-uri": ["fast-uri@3.1.5", "", {}, "sha512-fixture"],
+      "ajv/fast-uri": ["fast-uri@2.4.0", "", {}, "sha512-fixture"],
+    },
+  };
+  const twoRanges = advisory({
+    ghsa: LOCK_A,
+    vulnerabilities: [
+      {
+        package: { ecosystem: "npm", name: "fast-uri" },
+        vulnerable_version_range: ">= 3.0.0, < 3.1.6",
+        first_patched_version: "3.1.6",
+      },
+      {
+        package: { ecosystem: "npm", name: "fast-uri" },
+        vulnerable_version_range: "< 2.5.0",
+        first_patched_version: "3.1.6",
+      },
+    ],
+  });
+  const spawn = fakeSpawn({ advisories: [twoRanges] });
+  inTempRepo({ "bun.lock": lock }, () => captureLog(() => sweep(spawn)));
+
+  const writes = issueWrites(spawn);
+  assert.equal(writes.length, 1);
+  assert.equal(
+    titleOf(writes[0]),
+    "chore(deps): bump `fast-uri` to `3.1.6` in `bun.lock` (1 advisory)",
+  );
+  const body = bodyOf(writes[0]);
+  assert.deepEqual(parseMarker(body).ghsas, [LOCK_A]);
+  const lines = body.split("\n");
+  assert.ok(
+    lines.includes(
+      `| [${LOCK_A}](https://github.com/advisories/${LOCK_A}) | — | high | < 2.5.0 \\|\\| >= 3.0.0, < 3.1.6 | fast-uri is bad |`,
+    ),
+    "one row, with both ranges",
+  );
+  assert.ok(lines.includes("| `node_modules/fast-uri` | `3.1.5` |"));
+  assert.ok(
+    lines.includes("| `node_modules/ajv/node_modules/fast-uri` | `2.4.0` |"),
+    "the nested copy is named too",
+  );
+
+  // And the next run, with the ranges the other way round, writes nothing.
+  const again = fakeSpawn({
+    advisories: [
+      {
+        ...twoRanges,
+        vulnerabilities: [...twoRanges.vulnerabilities].reverse(),
+      },
+    ],
+    issues: [{ number: 52, title: titleOf(writes[0]), body }],
+  });
+  inTempRepo({ "bun.lock": lock }, () => captureLog(() => sweep(again)));
+  assert.equal(issueWrites(again).length, 0);
+});

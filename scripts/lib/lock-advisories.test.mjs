@@ -17,6 +17,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import semver from "semver";
 import {
   CONTROLS,
   LOCK_MANIFEST,
@@ -790,7 +791,94 @@ test("lockRecords takes the same entry twice once", () => {
   assert.equal(records.length, 1);
 });
 
-test("lockRecords stops on one advisory, package and range with two patched versions", () => {
+test("lockRecords joins two ranges of one package with ONE patched version into one record", () => {
+  // Two records would put the advisory in its issue twice. The ranges are in
+  // the order of the form semver reduces each to, whatever order they came in.
+  const versionsOf = lockedVersions([
+    { name: "fast-uri", version: "3.1.5" },
+    { name: "fast-uri", version: "2.4.0" },
+  ]);
+  for (const vulnerabilities of [
+    [
+      vuln("fast-uri", ">= 3.0.0, < 3.1.6", "3.1.6"),
+      vuln("fast-uri", "< 2.5.0", "3.1.6"),
+    ],
+    [
+      vuln("fast-uri", "< 2.5.0", "3.1.6"),
+      vuln("fast-uri", ">= 3.0.0, < 3.1.6", "3.1.6"),
+      // The first again, written another way: taken once.
+      vuln("fast-uri", "<2.5.0", "3.1.6"),
+    ],
+  ]) {
+    const records = lockRecords(
+      [advisory({ ghsa: A, vulnerabilities })],
+      versionsOf,
+    );
+    assert.equal(records.length, 1);
+    const range = records[0].security_vulnerability.vulnerable_version_range;
+    assert.equal(range, "< 2.5.0 || >= 3.0.0, < 3.1.6");
+    // As the sweep's own range reader takes it: either copy, and no other.
+    const read = semverRange(range);
+    assert.equal(read, "< 2.5.0 || >= 3.0.0 < 3.1.6");
+    assert.deepEqual(
+      ["2.4.0", "2.5.0", "3.1.5", "3.1.6"].map((v) =>
+        semver.satisfies(v, read),
+      ),
+      [true, false, true, false],
+    );
+  }
+});
+
+test("lockRecords stops on a locked version given two patched versions, however the two ranges are written", () => {
+  // The pull request's audit, round 1: compared as written, `<2.0.0` and
+  // `< 2.0.0` passed as two ranges and made two issues.
+  for (const [first, second] of [
+    ["< 3.1.6", "< 3.1.6"],
+    ["<3.1.6", "< 3.1.6"],
+    [">= 3.0.0, < 3.1.6", ">=3.0.0 <3.1.6"],
+    ["< 3.1.6", "<= 3.1.5"],
+    ["< 3.1.6", "< 4.0.0 || < 1.0.0"],
+  ]) {
+    assert.throws(
+      () =>
+        lockRecords(
+          [
+            advisory({
+              ghsa: A,
+              vulnerabilities: [
+                vuln("fast-uri", first, "3.1.6"),
+                vuln("fast-uri", second, "9.9.9"),
+              ],
+            }),
+          ],
+          lockedVersions([FAST_URI]),
+        ),
+      /GHSA-aaaa-aaaa-aaaa with two patched versions for fast-uri@3\.1\.5: 3\.1\.6 and 9\.9\.9/,
+      `${first} / ${second}`,
+    );
+  }
+});
+
+test("lockRecords stops on a locked version given a patched version and none", () => {
+  assert.throws(
+    () =>
+      lockRecords(
+        [
+          advisory({
+            ghsa: A,
+            vulnerabilities: [
+              vuln("fast-uri", "< 3.1.6", null),
+              vuln("fast-uri", "<3.1.6", "3.1.6"),
+            ],
+          }),
+        ],
+        lockedVersions([FAST_URI]),
+      ),
+    /with two patched versions for fast-uri@3\.1\.5: null and 3\.1\.6/,
+  );
+});
+
+test("lockRecords stops on the same range, as written, with two patched versions", () => {
   assert.throws(
     () =>
       lockRecords(
@@ -805,7 +893,7 @@ test("lockRecords stops on one advisory, package and range with two patched vers
         ],
         lockedVersions([FAST_URI]),
       ),
-    /the same range for fast-uri twice/,
+    /with two patched versions for fast-uri@3\.1\.5: 3\.1\.6 and 9\.9\.9/,
   );
 });
 

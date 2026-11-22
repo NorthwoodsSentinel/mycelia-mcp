@@ -52,7 +52,8 @@
 // as 3.0.0". Its test is kept as the round wrote it and marked `todo`, so it
 // runs on every run of this suite, fails, and is reported as an open item
 // without failing the suite. The proposed amendment and its reason are in the
-// comment beside it, and two more tests hold the amended verdict in place. An
+// comment beside it, and three more tests hold the amended verdict in place
+// (the pull request's first audit round called the amendment acceptable). An
 // amendment is a proposal: the review of the pull request judges it, and
 // accepting it is the owner's decision at merge.
 //
@@ -472,12 +473,16 @@ test("Codex case 2: copies of one GHSA that disagree on withdrawn_at stop the ru
 // nothing is selected, both copies are used, and the copies still have to
 // agree on everything said about the advisory as a whole (the test above).
 // The contradiction this variant reaches for does exist one step away, and
-// stops the run: the SAME package and range with two patched versions (the
-// last test of this case).
+// stops the run: ONE locked copy that the advisory gives two patched
+// versions (the last two tests of this case). The audit of the pull request,
+// round 1, called this amendment acceptable and found the first form of
+// that check too narrow: it compared the ranges as written, so one range
+// written with and without a space passed as two. The check now reads what
+// a range means, and the last test is that finding.
 test(
   "Codex case 2: the same GHSA for pkg-149 with a different patch such as 3.0.0 stops the run before any write",
   {
-    todo: "not met as written; the proposed amendment is in the comment above and the two tests below",
+    todo: "not met as written; the proposed amendment is in the comment above and the three tests below",
   },
   () => {
     const { spawn, run } = runCase2(
@@ -509,7 +514,7 @@ test("Codex case 2, amended: two packages of one GHSA with two patched versions 
   );
 });
 
-test("Codex case 2, amended: the same package and range with two patched versions in two copies stops the run before any write", () => {
+test("Codex case 2, amended: one locked copy given two patched versions by two copies stops the run before any write", () => {
   const { spawn, run } = runCase2(
     copyOfB([
       vuln("pkg-149", "< 2.0.0", "2.0.0"),
@@ -518,10 +523,30 @@ test("Codex case 2, amended: the same package and range with two patched version
   );
   assert.throws(
     run,
-    /the lock file check could not be completed \(the advisory listing held GHSA-bbbb-bbbb-bbbb with the same range for pkg-000 twice, with two patched versions\) — no issue was filed, commented on or cleared this run/,
+    /the lock file check could not be completed \(the advisory listing held GHSA-bbbb-bbbb-bbbb with two patched versions for pkg-000@1\.0\.0: 2\.0\.0 and 3\.0\.0\) — no issue was filed, commented on or cleared this run/,
   );
   assert.equal(listedIssues(spawn), false);
   assert.equal(issueWrites(spawn).length, 0);
+});
+
+test("Codex case 2, amended: the same holds however the two ranges are written", () => {
+  // The audit's finding, round 1: `<2.0.0` and `< 2.0.0` are one range. So
+  // are two ranges written differently that both hold the locked copy.
+  for (const range of ["<2.0.0", "<= 1.5.0", "< 2.0.0 || < 0.1.0"]) {
+    const { spawn, run } = runCase2(
+      copyOfB([
+        vuln("pkg-149", "< 2.0.0", "2.0.0"),
+        vuln("pkg-000", range, "3.0.0"),
+      ]),
+    );
+    assert.throws(
+      run,
+      /with two patched versions for pkg-000@1\.0\.0: 2\.0\.0 and 3\.0\.0/,
+      range,
+    );
+    assert.equal(listedIssues(spawn), false, range);
+    assert.equal(issueWrites(spawn).length, 0, range);
+  }
 });
 
 // ---------------------------------------------------------------------------

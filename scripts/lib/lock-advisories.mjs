@@ -474,15 +474,30 @@ export function controlStates(answer) {
  * The advisories that apply to the lock file, as records of the shape the
  * Dependabot alert listing gives.
  *
- * One record per (advisory, package, range) whose range some locked version
- * of that package satisfies. A withdrawn advisory makes none. `manifest_path`
- * is `bun.lock`, which the sweep already knows; the link is built from the
- * checked id; the scope says it was not determined, because whether a locked
- * package serves the running server or only the tooling is not computed.
+ * One record per (advisory, package, patched version): one bump, which is
+ * what the sweep files an issue for. A withdrawn advisory makes none.
+ * `manifest_path` is `bun.lock`, which the sweep already knows; the link is
+ * built from the checked id; the scope says it was not determined, because
+ * whether a locked package serves the running server or only the tooling is
+ * not computed.
  *
- * The same (advisory, package, range) twice with the same patched version is
- * taken once. With two patched versions it is a contradiction in the answers
- * and throws, as the same alert listed twice does in the sweep.
+ * What an advisory says about one package is read by MEANING, not by how a
+ * range happens to be written (the pull request's audit, round 1: `<2.0.0`
+ * and `< 2.0.0` are one range, and were taken for two):
+ *
+ *   - A locked version that one advisory puts in range with two DIFFERENT
+ *     patched versions is a contradiction, and throws: the answers disagree
+ *     about what that copy should move to, however each range is written.
+ *     Measured 2026-11-22 over the 7,768 live reviewed npm advisories and the
+ *     7,921 pairs of ranges that one of them gives one package: none overlap
+ *     with two patched versions; ten overlap with the same one.
+ *   - Ranges of one package with the SAME patched version are one bump, and
+ *     make one record. Its range is every such range a locked version is in,
+ *     each once by the form `semver` reduces it to, in that form's order,
+ *     joined with `||`, which the sweep's own range reader takes as "or".
+ *     Two records would put the advisory in its issue twice.
+ *   - So an entry that two copies of one advisory both hold
+ *     (`readLockAdvisories`) is taken once.
  *
  * @param {Iterable<object>} advisories checked entries, each id once
  * @param {Map<string, string[]>} versionsOf from `lockedVersions`
@@ -490,9 +505,12 @@ export function controlStates(answer) {
  */
 export function lockRecords(advisories, versionsOf) {
   const records = [];
-  const seen = new Map();
   for (const advisory of advisories) {
     if (advisory.withdrawn_at !== null) continue;
+    /** `name@version` → the patched version this advisory gives that copy. */
+    const patchOf = new Map();
+    /** One entry per bump: the ranges, by the form `semver` reduces each to. */
+    const bumps = new Map();
     for (const vulnerability of advisory.vulnerabilities) {
       const pkg = vulnerability.package;
       if (pkg?.ecosystem !== ECOSYSTEM || !versionsOf.has(pkg.name)) continue;
@@ -500,33 +518,35 @@ export function lockRecords(advisories, versionsOf) {
       // one query can also name a package another query asked about, whose
       // range that answer's check never read.
       const { range, patched } = rangeAndPatch(advisory.ghsa_id, vulnerability);
-      if (
-        !versionsOf
-          .get(pkg.name)
-          .some((version) => semver.satisfies(version, range))
-      ) {
-        continue;
+      const inRange = versionsOf
+        .get(pkg.name)
+        .filter((version) => semver.satisfies(version, range));
+      if (inRange.length === 0) continue;
+      for (const version of inRange) {
+        const locked = `${pkg.name}@${version}`;
+        if (patchOf.has(locked) && patchOf.get(locked) !== patched) {
+          throw new Error(
+            `the advisory listing held ${advisory.ghsa_id} with two patched versions for ${locked}: ${patchOf.get(locked)} and ${patched}`,
+          );
+        }
+        patchOf.set(locked, patched);
       }
-      const identity = JSON.stringify([
-        advisory.ghsa_id,
-        pkg.name,
-        vulnerability.vulnerable_version_range,
-      ]);
-      if (seen.has(identity)) {
-        // The same entry again is expected: an advisory two answers held
-        // brings each of its vulnerabilities twice (`readLockAdvisories`).
-        // The same range with ANOTHER patched version is a contradiction.
-        if (seen.get(identity) === patched) continue;
-        throw new Error(
-          `the advisory listing held ${advisory.ghsa_id} with the same range for ${pkg.name} twice, with two patched versions`,
-        );
+      const bump = JSON.stringify([pkg.name, patched]);
+      if (!bumps.has(bump)) {
+        bumps.set(bump, { name: pkg.name, patched, ranges: new Map() });
       }
-      seen.set(identity, patched);
+      const normal = semver.validRange(range);
+      const { ranges } = bumps.get(bump);
+      if (!ranges.has(normal)) {
+        ranges.set(normal, vulnerability.vulnerable_version_range.trim());
+      }
+    }
+    for (const { name, patched, ranges } of bumps.values()) {
       records.push({
         state: "open",
         html_url: `https://github.com/advisories/${advisory.ghsa_id}`,
         dependency: {
-          package: { ecosystem: ECOSYSTEM, name: pkg.name },
+          package: { ecosystem: ECOSYSTEM, name },
           manifest_path: LOCK_MANIFEST,
           scope: "not determined",
         },
@@ -537,7 +557,10 @@ export function lockRecords(advisories, versionsOf) {
           summary: advisory.summary,
         },
         security_vulnerability: {
-          vulnerable_version_range: vulnerability.vulnerable_version_range,
+          vulnerable_version_range: [...ranges]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([, written]) => written)
+            .join(" || "),
           first_patched_version:
             patched === null ? null : { identifier: patched },
         },
@@ -623,7 +646,8 @@ export function readLockAdvisories(spawn, entries) {
       // 2). What says whether the advisory applies at all must agree, or
       // the run stops. What each copy lists is united, so a package only
       // the later copy names is not lost; `lockRecords` takes an entry both
-      // copies hold once, and stops on one range with two patched versions.
+      // copies hold once, and stops on a locked version that the united
+      // advisory gives two patched versions.
       for (const field of ["withdrawn_at", "severity", "summary", "cve_id"]) {
         if (held[field] !== advisory[field]) {
           throw new Error(
