@@ -3,8 +3,8 @@
 // d330df9617e44ec893bc1a53618662239342d433,
 // scripts/verify-action-pins.mjs), copied and then edited. The Inspector's
 // header follows unchanged below this block, so "#NNNN" numbers are HIS issue
-// numbers and `dependency-refresh` is HIS monthly sweep, which this repo does
-// not have. Record: PROVENANCE.md.
+// numbers. The monthly `dependency-refresh` sweep it names is in this repo
+// too, adapted (scripts/dependency-refresh.mjs). Record: PROVENANCE.md.
 //
 // What differs from the Inspector, and why:
 //
@@ -18,8 +18,10 @@
 //   4. A workflow entry that is not a regular file (a symlink, a directory, a
 //      FIFO) is a finding and is not read: the guard's scope is the files IN
 //      `.github/workflows`, not whatever one of them points at.
-//   5. `SHA_REF` is defined here instead of imported from his
-//      `dependency-refresh.mjs`, which is not brought in.
+//   5. `SHA_REF` is defined here instead of imported from
+//      `dependency-refresh.mjs`. That script was not in this repo when this
+//      guard was brought in. It is now, and exports the same pattern; the
+//      local constant stays, and only this comment was corrected.
 //   6. Each entry is opened ONCE, with O_NOFOLLOW and O_NONBLOCK, and checked
 //      with fstat on that descriptor before it is read, so a symlink swapped in
 //      between a check and a read is not followed. O_NONBLOCK keeps a FIFO
