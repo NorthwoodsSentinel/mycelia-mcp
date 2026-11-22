@@ -8,7 +8,8 @@
 // excerpt is this file's first commit here. The source keeps these helpers
 // inside its upstream-watch script; that script is not in this repository, and
 // the helpers are wanted by the monthly dependency sweep
-// (`scripts/dependency-refresh.mjs`), so they live on their own here. The
+// (`scripts/dependency-refresh.mjs`) and by the daily alert sweep
+// (`scripts/dependabot-alerts.mjs`), so they live on their own here. The
 // "#NNNN" numbers below are the source repository's issues. Record:
 // PROVENANCE.md, "Sweeps". Design: docs/DESIGN-nor-673-sweeps.md, addition A1.
 //
@@ -36,9 +37,10 @@
 //   4. This header. The doc comments below are the source's, reworded only
 //      where they named the source's labels, its issue forms or its sweep.
 //
-// `isAutomationComment` is the source's, unchanged. Nothing in this repository
-// calls it yet: it is here because the daily alert sweep, a later piece of the
-// same design, reads comment markers.
+// `isAutomationComment` is the source's, unchanged. Its caller is the daily
+// alert sweep, which reads each comment's author and account type from the
+// REST comments listing and hands them over as `author` and `isBot`, the way
+// the source's upstream watch does.
 //
 // Known limit, the source's and kept: the login is matched after normalising
 // the spellings listed below. A spelling this file does not know makes the
