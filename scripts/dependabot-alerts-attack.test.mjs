@@ -92,6 +92,12 @@ const main = (repo, spawn, today) =>
     spawn,
     today,
     pacedWrites(() => {}),
+    // Added with the lock file check (the script's header, edit 15), which
+    // did not exist when the round wrote these cases: a check that found
+    // nothing, so each case runs against the alert path it was written for.
+    // No case's text, input or verdict is changed. The check has cases of
+    // its own, in scripts/dependabot-alerts-lock-attack.test.mjs.
+    () => ({ records: [], staleControls: [] }),
   );
 
 /** Shaped like a real `GET /repos/{o}/{r}/dependabot/alerts` entry. */

@@ -150,6 +150,44 @@
 //      review model's attack case 6. An alert that is not npm is different:
 //      it is logged and the run stays green, as in the source, because this
 //      sweep was never going to file it.
+//  15. ADDITION — the lock file check (docs/DESIGN-nor-695-lockfile-advisories.md).
+//      The source has no such step. GitHub's dependency graph for this
+//      repository holds the declared dependencies only (it does not read
+//      `bun.lock`), so a package that is merely locked raises no alert, and
+//      the sweep as adapted could not report it. `main` now also asks
+//      GitHub's advisory listing about every name@version pair in `bun.lock`
+//      (`scripts/lib/lock-advisories.mjs`, which holds the query, every check
+//      on its answers and the two control pairs) and hands each advisory that
+//      applies to the grouping below as one more record, shaped like an
+//      alert, with the manifest `bun.lock`. From there the run is the one
+//      above: the same marker, labels, issue, comment, pacing and
+//      reconciliation. What is new in this file:
+//        - `lockFileRecords`, made with the other reads and before any write.
+//          It reads the DISMISSED alerts, the lock file and the advisory
+//          listing; any failure in it, a control advisory missing from an
+//          answer included, stops the run with every issue as it was.
+//          Unlike edit 14's lazy read, the lock file is read here whether or
+//          not an alert needs it: an unreadable `bun.lock`, or an entry that
+//          is not a registry version, now stops the run before any write.
+//        - "The alert path wins": a record from the lock file is dropped when
+//          a Dependabot alert, open or dismissed, names the same npm package
+//          and advisory. An open alert already has or gets its own issue,
+//          which lists every locked copy in range. A dismissed alert is a
+//          person's decision, and without this the lock file would file it
+//          again the next day. An alert GitHub calls FIXED does not cover a
+//          record: it is judged from the manifest GitHub reads, and a nested
+//          copy still in range is what this check exists to report.
+//        - An advisory with no patched version is logged by name and files
+//          nothing, as an alert with none files nothing.
+//        - The issue text for the manifest `bun.lock` says where its
+//          advisories were found, and its cleared sentence names the three
+//          ways a lock-file advisory stops being reported.
+//        - A control advisory that is withdrawn upstream while the other
+//          still vouches for the answers: the run does its work and then
+//          fails, naming the control to replace.
+//        - `main` takes the check as its fifth parameter, so the cases for
+//          the alert path run without it and the cases for it state their own
+//          answers.
 //
 // Unchanged: the grouping by (package, manifest, patched version), the two
 // markers, the title, the order "comment first, then the marker", the
@@ -159,8 +197,12 @@
 //
 // Known limits, each stated in the design note, section 5: GitHub's
 // dependency graph holds only this repository's direct dependencies, so an
-// advisory on a transitive package raises no alert and this sweep cannot see
-// it. The `manifest_path` of an alert here is inferred to be `package.json`;
+// advisory on a transitive package raises no alert; since edit 15 the lock
+// file check reports it instead, with the limits its own design note states
+// (section 7: an issue it filed is cleared by the advisory's absence from an
+// answer; one a person closes while the advisory still applies is filed
+// again; malware and unreviewed advisories are not asked about).
+// The `manifest_path` of an alert here is inferred to be `package.json`;
 // no alert has existed to read it from. A listing is checked for its shape,
 // not against a total, which neither endpoint gives. An alert that is not
 // npm is logged and the run stays green. A failed read of the security
@@ -171,9 +213,11 @@
 //
 // What this file can write: issues, issue edits and issue comments in the
 // repository `GITHUB_REPOSITORY` names, with the token `gh` finds in its
-// environment. It reads that repository's open Dependabot alerts, its open
-// issues labelled `dependabot` and their comments, one repository setting,
-// and this checkout's `bun.lock`.
+// environment. It reads that repository's open and dismissed Dependabot
+// alerts, its open issues labelled `dependabot` and their comments, one
+// repository setting, this checkout's `bun.lock`, and GitHub's public
+// advisory listing (`GET /advisories`), to which it sends the package names
+// and versions that lock file holds.
 //
 // ---- the source's header, unchanged ----
 // Dependabot alert sweep (#2233), the alert-consuming half of #2229.
@@ -235,6 +279,7 @@ import { readFileSync } from "node:fs";
 import semver from "semver";
 import { parseBunLock } from "./lib/bun-lock.mjs";
 import { gh, ghPaginatedList, REPO_SLUG } from "./lib/gh.mjs";
+import { LOCK_MANIFEST, readLockAdvisories } from "./lib/lock-advisories.mjs";
 import { escapeTableCell as cell } from "./lib/markdown-cell.mjs";
 import { isMainModule } from "./lib/main-module.mjs";
 import { pacedWrites } from "./lib/paced-writes.mjs";
@@ -274,6 +319,15 @@ export const KNOWN_MANIFESTS = ["package.json", "bun.lock"];
 
 /** Where a declared range lives: this repository has one manifest. */
 const DECLARED_IN = "package.json";
+
+/**
+ * Why an issue for the manifest `bun.lock` is rewritten to its cleared form
+ * (the header, edit 15). One sentence for the three ways an advisory stops
+ * being reported by the lock file check; it must stay the same from run to
+ * run, because a cleared body is compared with the one already there.
+ */
+export const LOCK_CLEARED_REASON =
+  "nothing reports its advisories for `bun.lock` any more: no locked version is in range, the advisory was withdrawn, or a Dependabot alert for the same package and advisory now covers it";
 
 /** The labels each issue is filed with. */
 export const ISSUE_LABELS = ["factory", "chore", "dependabot"];
@@ -659,6 +713,13 @@ export function buildIssueBody(
 ) {
   const covered = ghsas ?? group.ghsas;
   const applying = group.advisories.length;
+  // In this repo (the header, edit 15): an issue for the manifest `bun.lock`
+  // says its advisories were found against that file. The wording claims
+  // nothing about alerts, so it stays true whichever path found them.
+  const fromLock = group.manifestPath === LOCK_MANIFEST;
+  const filedFrom = fromLock
+    ? `Filed automatically: ${applying} ${applying === 1 ? "advisory" : "advisories"} in GitHub's advisory database ${applying === 1 ? "applies" : "apply"} to a version locked in \`${LOCKFILE}\`.`
+    : `Filed automatically from ${applying} open Dependabot ${applying === 1 ? "alert" : "alerts"}.`;
   // ⚠️ Every free-form cell is escaped, the RANGE included: a semver range is
   // allowed to contain `||`, so a disjoint advisory range like
   // `>= 1.0, < 2.0 || >= 3.0, < 3.5` would otherwise inject two extra column
@@ -711,7 +772,7 @@ export function buildIssueBody(
     // setting. The guard degrades to UNVERIFIED when the token cannot see it,
     // and an issue asserting what the run explicitly could not confirm is worse
     // than one that says so (Copilot).
-    `Filed automatically from ${applying} open Dependabot ${applying === 1 ? "alert" : "alerts"}. ${securityPrsOff ? "Dependabot opens no security-update PRs on this repo; the" : "The"} fix is written by hand against \`${TARGET_BRANCH}\`.`,
+    `${filedFrom} ${securityPrsOff ? "Dependabot opens no security-update PRs on this repo; the" : "The"} fix is written by hand against \`${TARGET_BRANCH}\`.`,
     "",
     "| | |",
     "| --- | --- |",
@@ -733,7 +794,7 @@ export function buildIssueBody(
     fix,
     "",
     "> [!NOTE]",
-    `> **Where each number comes from.** The GHSA, CVE, severity, vulnerable range and summary are the advisory's own, reported by Dependabot. What was verified independently against \`${TARGET_BRANCH}\` is the **installed versions, their paths, and whether each advisory's range still matches**, read from \`${LOCKFILE}\` — the alert itself says nothing of which version is installed, so an issue is filed here only after that re-check.`,
+    `> **Where each number comes from.** The GHSA, CVE, severity, vulnerable range and summary are the advisory's own, reported by ${fromLock ? "GitHub's advisory database" : "Dependabot"}. What was verified independently against \`${TARGET_BRANCH}\` is the **installed versions, their paths, and whether each advisory's range still matches**, read from \`${LOCKFILE}\` — the ${fromLock ? "advisory" : "alert"} itself says nothing of which version is installed, so an issue is filed here only after that re-check.`,
   ].join("\n");
 }
 
@@ -815,7 +876,9 @@ export function buildNewAdvisoryComment(group, added) {
     // body's current state — the edit may not have happened yet, and may fail
     // (Copilot). It speaks for the comment's own marker, which is true the
     // moment this is posted.
-    `${added.length} new Dependabot ${added.length === 1 ? "advisory" : "advisories"} for \`${group.package}\`, cleared by the same bump to \`${group.fixedIn}\`. This comment's own marker records ${added.length === 1 ? "it" : "them"} as announced, so a later run will not repeat this even if the issue body has yet to catch up.`,
+    // In this repo (the header, edit 15): an advisory found against
+    // `bun.lock` is not called Dependabot's.
+    `${added.length} new ${group.manifestPath === LOCK_MANIFEST ? "" : "Dependabot "}${added.length === 1 ? "advisory" : "advisories"} for \`${group.package}\`, cleared by the same bump to \`${group.fixedIn}\`. This comment's own marker records ${added.length === 1 ? "it" : "them"} as announced, so a later run will not repeat this even if the issue body has yet to catch up.`,
     "",
     "| GHSA | Severity | Summary |",
     "| --- | --- | --- |",
@@ -1148,6 +1211,120 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** One advisory on one npm package, whichever manifest or path reported it. */
+const coverKey = (pkg, ghsa) => JSON.stringify([pkg, ghsa]);
+
+/**
+ * Every (npm package, advisory) a DISMISSED Dependabot alert names.
+ *
+ * In this repo (the header, edit 15). Its one use is "the alert path wins": a
+ * dismissed alert is a person's decision about that advisory on that package,
+ * and the lock file check, which reads the same advisory database, would
+ * otherwise file it again the day after it was dismissed.
+ *
+ * The listing goes through `ghPaginatedList`, which throws on a failed call,
+ * on an answer that is not a list of pages and on no pages at all. Each entry
+ * must be an object in one of the two states asked for that states its
+ * package, its ecosystem and its advisory: an entry this cannot key is a
+ * dismissal the run cannot honour, and skipping it would file what a person
+ * had put aside.
+ *
+ * @returns {Set<string>} `coverKey`s
+ */
+function dismissedAlerts(repo, spawn) {
+  const path = `repos/${repo}/dependabot/alerts?state=dismissed,auto_dismissed&per_page=100`;
+  const named = (value) => typeof value === "string" && value !== "";
+  const covered = new Set();
+  for (const alert of ghPaginatedList(spawn, path)) {
+    if (
+      !isRecord(alert) ||
+      !["dismissed", "auto_dismissed"].includes(alert.state) ||
+      !named(alert.dependency?.package?.name) ||
+      !named(alert.dependency?.package?.ecosystem) ||
+      !named(alert.security_advisory?.ghsa_id)
+    ) {
+      throw new Error(
+        `unexpected response from ${path}: an entry that is not a dismissed alert stating its package, ecosystem and advisory`,
+      );
+    }
+    if (alert.dependency.package.ecosystem === SUPPORTED_ECOSYSTEM) {
+      covered.add(
+        coverKey(
+          alert.dependency.package.name,
+          alert.security_advisory.ghsa_id,
+        ),
+      );
+    }
+  }
+  return covered;
+}
+
+/**
+ * The lock file check: every advisory that applies to a version locked in
+ * `bun.lock` and that no Dependabot alert already covers, as records shaped
+ * like alerts (`scripts/lib/lock-advisories.mjs`).
+ *
+ * In this repo (the header, edit 15). Three reads, all made before `main`
+ * writes anything, and each a throw on failure: the dismissed alerts, this
+ * checkout's `bun.lock` (by its constant name, through the reader the install
+ * guard uses), and the advisory listing. A lock file that is missing or will
+ * not parse throws here; it is a failed read, never evidence.
+ *
+ * "The alert path wins": a record is dropped when an alert in `alerts` (the
+ * open ones) or a dismissed one names the same npm package and advisory. The
+ * open alert's own issue already lists every locked copy in range. A FIXED
+ * alert covers nothing, and is not read: GitHub judges it from the manifest
+ * it reads, and a nested copy still in range is what this check is for.
+ *
+ * A record with no patched version is logged by name and kept: the grouping
+ * files nothing for it, as for an alert with none, and keeping it is what
+ * stops the reconciliation from clearing an issue whose advisory is still
+ * open but has lost its patched version.
+ *
+ * @param {string} repo
+ * @param {typeof spawnSync} spawn
+ * @param {object[]} alerts the open alerts, as `openAlerts` returns them
+ * @returns {{records: object[], staleControls: string[]}}
+ */
+export function lockFileRecords(repo, spawn, alerts) {
+  const covered = dismissedAlerts(repo, spawn);
+  for (const alert of alerts) {
+    if (alert.dependency.package.ecosystem === SUPPORTED_ECOSYSTEM) {
+      covered.add(
+        coverKey(
+          alert.dependency.package.name,
+          alert.security_advisory.ghsa_id,
+        ),
+      );
+    }
+  }
+
+  const { entries } = parseBunLock(readFileSync(LOCKFILE, "utf8"));
+  const { records, staleControls } = readLockAdvisories(spawn, entries);
+
+  const kept = [];
+  for (const record of records) {
+    const pkg = record.dependency.package.name;
+    const ghsa = record.security_advisory.ghsa_id;
+    if (covered.has(coverKey(pkg, ghsa))) {
+      console.log(
+        `dependabot-alerts: ${ghsa} applies to ${pkg} in ${LOCKFILE}, and a Dependabot alert, open or dismissed, already names it — left to the alert`,
+      );
+      continue;
+    }
+    if (record.security_vulnerability.first_patched_version === null) {
+      console.log(
+        `dependabot-alerts: ${ghsa} applies to ${pkg} in ${LOCKFILE} and has no patched version yet — there is nothing to bump to, so no issue is filed for it`,
+      );
+    }
+    kept.push(record);
+  }
+  console.log(
+    `dependabot-alerts: checked the ${entries.length} entries of ${LOCKFILE} against GitHub's advisory database — ${records.length} advisory ${records.length === 1 ? "range applies" : "ranges apply"} to a locked version, ${kept.length} of them not covered by a Dependabot alert`,
+  );
+  return { records: kept, staleControls };
+}
+
 /**
  * Who wrote this issue or comment, as the REST listing states it: an account
  * with a login and a type, or `null` (the endpoint's answer for an account
@@ -1351,18 +1528,45 @@ function createIssue(repo, group, body, spawn, write) {
  * @param {<T>(write: () => T) => T} [write] what every issue write goes
  *   through (addition A3); defaults to `pacedWrites()`, which waits a real
  *   second before any write after the first (`lib/paced-writes.mjs`)
+ * @param {typeof lockFileRecords} [lockCheck] the lock file check (the
+ *   header, edit 15); defaults to `lockFileRecords`. A parameter so that the
+ *   cases for the alert path can run without it
  */
 export function main(
   repo = process.env.GITHUB_REPOSITORY,
   spawn = spawnSync,
   today = new Date().toISOString().slice(0, 10),
   write = pacedWrites(),
+  lockCheck = lockFileRecords,
 ) {
   if (!repo) throw new Error("repo not specified (GITHUB_REPOSITORY unset)");
 
   const securityPrsOff = checkSecurityPrsStillDisabled(repo, spawn);
 
-  const alerts = openAlerts(repo, spawn);
+  const dependabotAlerts = openAlerts(repo, spawn);
+
+  // In this repo (the header, edit 15): the lock file check, made with the
+  // other reads and before any write. ⚠️ Every failure in it throws here, and
+  // none degrades to "nothing found": an issue it filed earlier is cleared
+  // when its advisory is ABSENT from what this returns, so a lock file that
+  // could not be read, a listing that could not be reached, an answer that
+  // failed a check or an answer without a control advisory would stand down
+  // issues for advisories that still apply. Nothing has been written yet, so
+  // throwing leaves every issue as it was, and the next scheduled run is the
+  // retry.
+  let lockFound;
+  try {
+    lockFound = lockCheck(repo, spawn, dependabotAlerts);
+  } catch (error) {
+    throw new Error(
+      `dependabot-alerts: the lock file check could not be completed (${error?.message ?? error}) — no issue was filed, commented on or cleared this run`,
+    );
+  }
+
+  // From here on a record from the lock file is one more open alert: the
+  // grouping, the range re-check, the marker and the reconciliation below
+  // read both alike.
+  const alerts = [...dependabotAlerts, ...lockFound.records];
   const groups = groupAlerts(alerts);
 
   // ⚠️ Loaded BEFORE the zero-group early return, and reconciled after the loop.
@@ -1706,9 +1910,15 @@ export function main(
     const tracked = stillOpen.filter(
       (g) => disposition.get(key3(g)) === "tracked",
     );
+    // In this repo (the header, edit 15): an issue for the manifest
+    // `bun.lock` was filed from the lock file check, where an advisory stops
+    // being reported for one of three reasons, and the run cannot tell which.
+    // The sentence names all three and picks none.
     const reason =
       stillOpen.length === 0
-        ? "every alert it tracked has been fixed or dismissed"
+        ? issue.marker.manifestPath === LOCK_MANIFEST
+          ? LOCK_CLEARED_REASON
+          : "every alert it tracked has been fixed or dismissed"
         : tracked.length > 0
           ? `this bump was superseded — ${tracked.map((g) => `\`${g}\``).join(", ")} ${tracked.length === 1 ? "is" : "are"} still open under a different patched version, and ${tracked.length === 1 ? "has" : "have"} their own issue`
           : "no installed copy is in range of its advisories any more";
@@ -1733,10 +1943,25 @@ export function main(
   // run over, but not at the cost of the issues it could still file or
   // refresh. Without it the run would be green having checked nothing, which
   // is a sweep that did not sweep (the review model's attack case 6).
+  //
+  // In this repo (the header, edit 15): a control of the lock file check that
+  // has gone stale ends the run the same way, after the work, and for the
+  // same kind of reason: the answers were vouched for by the other control,
+  // so every issue above is right, and a control nobody replaces would leave
+  // the check with none the day the second one is withdrawn.
+  const failures = [];
   if (unchecked.length > 0) {
-    throw new Error(
+    failures.push(
       `dependabot-alerts: ${unchecked.length} open npm ${unchecked.length === 1 ? "bump" : "bumps"} could not be checked this run; no issue of ${unchecked.length === 1 ? "its" : "theirs"} was filed, edited or cleared —\n  ${unchecked.join("\n  ")}`,
     );
+  }
+  if (lockFound.staleControls.length > 0) {
+    failures.push(
+      `dependabot-alerts: the lock file check's control ${lockFound.staleControls.join(" and ")} no longer vouches for an answer: its advisory is withdrawn or no longer covers that version. The other control did, so this run's issues stand; replace the stale one in scripts/lib/lock-advisories.mjs`,
+    );
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join("\n"));
   }
 }
 
